@@ -48,29 +48,28 @@ pub(crate) fn window_png() -> Result<Vec<u8>, String> {
         .ok_or("the window could not make a bitmap")?;
     view.cacheDisplayInRect_toBitmapImageRep(bounds, &rep);
     let properties = NSDictionary::new();
-    let data = unsafe {
-        rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &properties)
-    }
-    .ok_or("the window bitmap could not be encoded as PNG")?;
+    let data =
+        unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &properties) }
+            .ok_or("the window bitmap could not be encoded as PNG")?;
     Ok(data.to_vec())
 }
 
 #[cfg(target_os = "windows")]
 pub(crate) fn window_png() -> Result<Vec<u8>, String> {
     use std::ffi::c_void;
-    use windows::core::BOOL;
     use windows::Win32::{
         Foundation::{HWND, LPARAM, POINT, RECT},
         Graphics::Gdi::{
-            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC,
-            DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, HGDIOBJ, ReleaseDC,
-            SRCCOPY, SelectObject,
+            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap,
+            CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, HGDIOBJ,
+            ReleaseDC, SRCCOPY, SelectObject,
         },
         System::Threading::GetCurrentProcessId,
         UI::WindowsAndMessaging::{
             EnumWindows, GetClientRect, GetWindowThreadProcessId, IsWindowVisible,
         },
     };
+    use windows::core::BOOL;
 
     unsafe extern "system" fn enum_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
         unsafe {
@@ -189,9 +188,7 @@ fn encode_png(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String>
         let mut encoder = png::Encoder::new(&mut out, width, height);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder
-            .write_header()
-            .map_err(|error| error.to_string())?;
+        let mut writer = encoder.write_header().map_err(|error| error.to_string())?;
         writer
             .write_image_data(pixels)
             .map_err(|error| error.to_string())?;
@@ -202,16 +199,12 @@ fn encode_png(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String>
 
 #[cfg(target_os = "linux")]
 pub(crate) fn window_png() -> Result<Vec<u8>, String> {
-    use nsh_platform_linux::gtk4::{
-        self, gdk::prelude::*, graphene, gsk::prelude::*, prelude::*,
-    };
+    use nsh_platform_linux::gtk4::{self, gdk::prelude::*, graphene, gsk::prelude::*, prelude::*};
 
     let window = gtk4::Window::list_toplevels()
         .into_iter()
         .filter_map(|widget| widget.downcast::<gtk4::Window>().ok())
-        .filter(|window| {
-            window.is_visible() && window.width() > 100 && window.height() > 100
-        })
+        .filter(|window| window.is_visible() && window.width() > 100 && window.height() > 100)
         .max_by_key(|window| window.width() * window.height())
         .ok_or("the app has no visible window to capture")?;
     let width = window.width() as f32;

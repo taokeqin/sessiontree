@@ -67,13 +67,16 @@ fn search_input(
             view()
                 .flex_1()
                 .h(px(24.))
-                .child(when(move || value.get().is_empty(), move || {
-                    caption(placeholder, 11., MUTED)
-                        .absolute()
-                        .left(px(4.))
-                        .top(px(5.))
-                        .number_of_lines(1)
-                }))
+                .child(when(
+                    move || value.get().is_empty(),
+                    move || {
+                        caption(placeholder, 11., MUTED)
+                            .absolute()
+                            .left(px(4.))
+                            .top(px(5.))
+                            .number_of_lines(1)
+                    },
+                ))
                 .child({
                     let field = input()
                         .w(relative(1.))
@@ -96,19 +99,22 @@ fn search_input(
                     }
                 }),
         )
-        .child(when(move || !value.get().is_empty(), move || {
-            view()
-                .role(AccessibilityRole::Button)
-                .label("Clear search")
-                .w(px(18.))
-                .h(px(18.))
-                .rounded(px(4.))
-                .items_center()
-                .justify_center()
-                .hover(|v| v.bg(rgb(0x1f1f24)))
-                .on_press(move |_: &()| value.set(String::new()))
-                .child(caption("✕", 10., MUTED))
-        }))
+        .child(when(
+            move || !value.get().is_empty(),
+            move || {
+                view()
+                    .role(AccessibilityRole::Button)
+                    .label("Clear search")
+                    .w(px(18.))
+                    .h(px(18.))
+                    .rounded(px(4.))
+                    .items_center()
+                    .justify_center()
+                    .hover(|v| v.bg(rgb(0x1f1f24)))
+                    .on_press(move |_: &()| value.set(String::new()))
+                    .child(caption("✕", 10., MUTED))
+            },
+        ))
 }
 
 fn row() -> View {
@@ -977,16 +983,8 @@ fn share_toggle(
                 .h(px(18.))
                 .rounded(px(4.))
                 .border_1()
-                .border_color(move || {
-                    rgb(if on() { GREEN } else { 0x3a3a42 })
-                })
-                .bg(move || {
-                    if on() {
-                        rgb(GREEN)
-                    } else {
-                        rgba(0x00000000)
-                    }
-                })
+                .border_color(move || rgb(if on() { GREEN } else { 0x3a3a42 }))
+                .bg(move || if on() { rgb(GREEN) } else { rgba(0x00000000) })
                 .items_center()
                 .justify_center()
                 .child(when(on, move || {
@@ -1242,9 +1240,8 @@ fn search_hits(root: &Node, query: &str, metric: Metric) -> Vec<Arc<Node>> {
 }
 
 fn search_contents(s: State) -> impl IntoElement {
-    let hits = computed(move || {
-        search_hits(&s.snapshot.get().root, &s.query.get(), s.metric.get())
-    });
+    let hits =
+        computed(move || search_hits(&s.snapshot.get().root, &s.query.get(), s.metric.get()));
     scroll().flex_1().child(
         view()
             .p(px(14.))
@@ -1264,12 +1261,16 @@ fn search_contents(s: State) -> impl IntoElement {
                 |node| node.path.clone(),
                 move |node, _| search_row(s, node),
             ))
-            .child(when(move || hits.get().is_empty(), move || {
-                view()
-                    .py(px(18.))
-                    .items_center()
-                    .child(caption("No matching agents, projects or sessions.", 11., MUTED))
-            })),
+            .child(when(
+                move || hits.get().is_empty(),
+                move || {
+                    view().py(px(18.)).items_center().child(caption(
+                        "No matching agents, projects or sessions.",
+                        11.,
+                        MUTED,
+                    ))
+                },
+            )),
     )
 }
 
@@ -1306,8 +1307,7 @@ fn search_row(s: State, node: ReadSignal<Arc<Node>>) -> impl IntoElement {
                         .min_w(px(0.))
                         .gap(px(2.))
                         .child(
-                            caption(move || node.get().name.clone(), 11., INK)
-                                .number_of_lines(1),
+                            caption(move || node.get().name.clone(), 11., INK).number_of_lines(1),
                         )
                         .child(
                             caption(
@@ -1322,7 +1322,10 @@ fn search_row(s: State, node: ReadSignal<Arc<Node>>) -> impl IntoElement {
                                     } else if node.kind == "project" {
                                         format!("{} · {} sessions", node.tool, count(node.sessions))
                                     } else {
-                                        format!("Agent · {} projects", count(node.children.len() as u64))
+                                        format!(
+                                            "Agent · {} projects",
+                                            count(node.children.len() as u64)
+                                        )
                                     }
                                 },
                                 9.,
@@ -1514,12 +1517,12 @@ fn details_page(s: State) -> impl IntoElement {
                     .gap(px(14.))
                     .child(stat("COST", move || money(node().cost)))
                     .child(stat("LAST", move || {
-                    if numbers_hidden() {
-                        "•••".into()
-                    } else {
-                        stamp(node().last_ts)
-                    }
-                })),
+                        if numbers_hidden() {
+                            "•••".into()
+                        } else {
+                            stamp(node().last_ts)
+                        }
+                    })),
             )
             .child(when(
                 move || node().kind == "project",
@@ -1600,12 +1603,16 @@ fn project_sessions(s: State) -> impl IntoElement {
             |node| node.path.clone(),
             move |node, _| child_row(s, node),
         ))
-        .child(when(move || sessions.get().0.is_empty(), move || {
-            view()
-                .py(px(14.))
-                .items_center()
-                .child(caption("No sessions match this search.", 10., MUTED))
-        }))
+        .child(when(
+            move || sessions.get().0.is_empty(),
+            move || {
+                view().py(px(14.)).items_center().child(caption(
+                    "No sessions match this search.",
+                    10.,
+                    MUTED,
+                ))
+            },
+        ))
 }
 
 fn sources_footer(s: State) -> impl IntoElement {

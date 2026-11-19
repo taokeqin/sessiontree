@@ -1,5 +1,10 @@
 //! Application state. Reading transcripts never runs on the UI thread.
-use crate::{capture, model::*, scan, share::{self, ShareOptions}};
+use crate::{
+    capture,
+    model::*,
+    scan,
+    share::{self, ShareOptions},
+};
 use nsh_core::prelude::*;
 use std::time::{Duration, Instant};
 
@@ -52,9 +57,7 @@ impl State {
             share_sessions: signal(false),
             share_numbers: signal(false),
             share_busy: signal(false),
-            share_status: signal(
-                "Captures this window. Nothing leaves this machine.".into(),
-            ),
+            share_status: signal("Captures this window. Nothing leaves this machine.".into()),
             map_frame: signal((700.0, 520.0)),
             query: signal(String::new()),
             project_query: signal(String::new()),

@@ -50,13 +50,15 @@ fn labels(root: &Node) -> Labels {
             .agents
             .insert(agent.tool.clone(), format!("Agent {}", agent_index + 1));
         for (project_index, project) in agent.children.iter().enumerate() {
-            labels
-                .projects
-                .insert(project.path.clone(), format!("Project {}", project_index + 1));
+            labels.projects.insert(
+                project.path.clone(),
+                format!("Project {}", project_index + 1),
+            );
             for (session_index, session) in project.children.iter().enumerate() {
-                labels
-                    .sessions
-                    .insert(session.path.clone(), format!("Session {}", session_index + 1));
+                labels.sessions.insert(
+                    session.path.clone(),
+                    format!("Session {}", session_index + 1),
+                );
             }
         }
     }
@@ -213,13 +215,7 @@ pub(crate) fn painter(
         .fill_rect(0.0, 0.0, WIDTH, 3.0);
 
     p = draw_mark(p, 52.0, 42.0, 1.5);
-    p = text(
-        p,
-        "sessiontree",
-        98.0,
-        46.0,
-        style(22.0, 600, INK),
-    );
+    p = text(p, "sessiontree", 98.0, 46.0, style(22.0, 600, INK));
     p = text(
         p,
         "sessiontree.app",
@@ -241,7 +237,10 @@ pub(crate) fn painter(
     );
 
     let summary = if options.mask_numbers {
-        format!("Session activity  ·  area = {}", metric.label().to_lowercase())
+        format!(
+            "Session activity  ·  area = {}",
+            metric.label().to_lowercase()
+        )
     } else {
         format!(
             "{} sessions  ·  {} tokens  ·  {}  ·  area = {}",
@@ -251,13 +250,7 @@ pub(crate) fn painter(
             metric.label().to_lowercase()
         )
     };
-    p = text(
-        p,
-        &summary,
-        52.0,
-        156.0,
-        style(12.0, 400, MUTED),
-    );
+    p = text(p, &summary, 52.0, 156.0, style(12.0, 400, MUTED));
 
     // The map keeps the on-screen frame's aspect, so its tiles are the ones
     // the window shows, not a re-flow at a different shape.
@@ -277,13 +270,7 @@ pub(crate) fn painter(
     let map_y = 194.0;
     let map_scale = map_w / frame.0.max(1.0);
 
-    p = rounded(
-        p,
-        area(map_x, map_y, map_w, map_h),
-        8.0,
-        rgb(MAP),
-        None,
-    );
+    p = rounded(p, area(map_x, map_y, map_w, map_h), 8.0, rgb(MAP), None);
     let levels = if node.kind == "root" || node.kind == "agent" {
         levels.max(2)
     } else {
@@ -296,10 +283,7 @@ pub(crate) fn painter(
         metric,
         levels,
     );
-    p = p
-        .save()
-        .translate(map_x, map_y)
-        .scale(map_scale, map_scale);
+    p = p.save().translate(map_x, map_y).scale(map_scale, map_scale);
     if tiles.is_empty() {
         p = text(
             p,
@@ -338,23 +322,14 @@ pub(crate) fn painter(
                 style(11.0, 600, INK),
             );
         }
-        if width > 90.0
-            && height > 70.0
-            && (tile.node.is_leaf() || tile.depth >= levels)
-        {
+        if width > 90.0 && height > 70.0 && (tile.node.is_leaf() || tile.depth >= levels) {
             let value = if options.mask_numbers {
                 "•••".to_owned()
             } else {
                 metric.value(&tile.node)
             };
             let value_size = if width > 200.0 { 22.0 } else { 13.0 };
-            p = text(
-                p,
-                &value,
-                x + 5.0,
-                y + 23.0,
-                style(value_size, 400, INK),
-            );
+            p = text(p, &value, x + 5.0, y + 23.0, style(value_size, 400, INK));
         }
     }
     p = p.restore();
@@ -399,13 +374,7 @@ pub(crate) fn painter(
             } else {
                 metric.value(child)
             };
-            p = text(
-                p,
-                &value,
-                x + 520.0,
-                y + 2.0,
-                style_right(11.0, 400, MUTED),
-            );
+            p = text(p, &value, x + 520.0, y + 2.0, style_right(11.0, 400, MUTED));
         }
         let rows = entries.len().div_ceil(2) as f32;
         footer_y = legend_top + 24.0 + rows * 25.0 + 12.0;
@@ -491,8 +460,7 @@ pub(crate) fn render(
 }
 
 pub(crate) fn data_uri(png: &[u8]) -> String {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(22 + png.len().div_ceil(3) * 4);
     out.push_str("data:image/png;base64,");
     for chunk in png.chunks(3) {
@@ -630,7 +598,10 @@ mod tests {
         assert_eq!(node_label(agent, masked, &labels), "Agent 1");
         assert_eq!(node_label(project, masked, &labels), "Project 1");
         assert_eq!(node_label(session, masked, &labels), "Session 1");
-        assert_eq!(node_label(agent, ShareOptions::default(), &labels), "Claude Code");
+        assert_eq!(
+            node_label(agent, ShareOptions::default(), &labels),
+            "Claude Code"
+        );
         assert_eq!(node_label(project, ShareOptions::default(), &labels), "x");
         assert_eq!(
             node_label(session, ShareOptions::default(), &labels),

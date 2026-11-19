@@ -992,10 +992,7 @@ fn parse_dsh_file(path: &Path, fallback_ts: i64) -> Result<Option<Session>, Stri
                 }
             }
             Some("session/title") => {
-                if let Some(found) = value
-                    .pointer("/data/title")
-                    .and_then(Value::as_str)
-                {
+                if let Some(found) = value.pointer("/data/title").and_then(Value::as_str) {
                     title = found.to_owned();
                 }
             }
@@ -1142,11 +1139,7 @@ struct TurnTotals {
     cost: f64,
 }
 
-fn parse_opencode_tool(
-    path: &Path,
-    tool: &str,
-    prefix: &str,
-) -> Result<Vec<Session>, String> {
+fn parse_opencode_tool(path: &Path, tool: &str, prefix: &str) -> Result<Vec<Session>, String> {
     let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|error| format!("{}: {error}", path.display()))?;
     let session_table = if table_exists(&connection, "session") {
@@ -1252,7 +1245,8 @@ fn parse_opencode_tool(
             }
         }
     }
-    if table_exists(&connection, "message") && !table_columns(&connection, "message").contains("role")
+    if table_exists(&connection, "message")
+        && !table_columns(&connection, "message").contains("role")
     {
         if let Ok(mut statement) = connection.prepare(
             "SELECT session_id, COUNT(*),
@@ -1297,11 +1291,7 @@ fn parse_opencode_tool(
                     COALESCE(json_extract(data,'$.providerID'), json_extract(data,'$.provider'))
              FROM message WHERE json_extract(data,'$.role')='assistant' ORDER BY time_created",
         ) && let Ok(rows) = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row_text(row, 1),
-                row_text(row, 2),
-            ))
+            Ok((row.get::<_, String>(0)?, row_text(row, 1), row_text(row, 2)))
         }) {
             for (id, model, provider) in rows.flatten() {
                 if !model.is_empty() {
@@ -1830,7 +1820,10 @@ fn zcode_transcript_files(errors: &mut Vec<String>) -> Vec<PathBuf> {
         return Vec::new();
     };
     walk_files(&root, errors, |path| {
-        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
         name.ends_with(".jsonl")
             && !name.ends_with(".checkpoints.jsonl")
             && !name.ends_with(".prompts.jsonl")
@@ -1843,7 +1836,10 @@ fn zcode_legacy_files(errors: &mut Vec<String>) -> Vec<PathBuf> {
         return Vec::new();
     };
     walk_files(&root, errors, |path| {
-        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
         name.ends_with(".json") && !name.ends_with(".deleted.json")
     })
 }
@@ -1866,8 +1862,8 @@ fn timestamp_millis(value: Option<&Value>) -> i64 {
     let Some(value) = value else {
         return 0;
     };
-    let number = number(Some(value))
-        .or_else(|| value.as_str().and_then(|text| text.parse::<i64>().ok()));
+    let number =
+        number(Some(value)).or_else(|| value.as_str().and_then(|text| text.parse::<i64>().ok()));
     if let Some(number) = number {
         return if number > 0 && number < 100_000_000_000 {
             number * 1000
@@ -1875,10 +1871,7 @@ fn timestamp_millis(value: Option<&Value>) -> i64 {
             number
         };
     }
-    value
-        .as_str()
-        .and_then(rfc3339_millis)
-        .unwrap_or(0)
+    value.as_str().and_then(rfc3339_millis).unwrap_or(0)
 }
 
 fn model_from_value(value: Option<&Value>) -> String {
@@ -2020,10 +2013,7 @@ fn parse_zcode_file(path: &Path, fallback_ts: i64) -> Result<Option<Session>, St
             last_ts = last_ts.max(ts);
         }
         messages += 1;
-        let content = value
-            .get("content")
-            .map(text_value)
-            .unwrap_or_default();
+        let content = value.get("content").map(text_value).unwrap_or_default();
         if role == "user" && title.is_empty() && !content.trim().is_empty() {
             title = zcode_title(&content);
         }
@@ -2078,8 +2068,7 @@ fn parse_zcode_file(path: &Path, fallback_ts: i64) -> Result<Option<Session>, St
 }
 
 fn parse_zcode_legacy_file(path: &Path, fallback_ts: i64) -> Result<Option<Session>, String> {
-    let text =
-        fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let text = fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
     let Ok(value) = serde_json::from_str::<Value>(&text) else {
         return Ok(None);
     };
@@ -2110,14 +2099,8 @@ fn parse_zcode_legacy_file(path: &Path, fallback_ts: i64) -> Result<Option<Sessi
     let mut cache_write = 0_u64;
     let mut stored_cost = 0.0;
     let mut model = String::new();
-    let mut first_ts = timestamp_millis(
-        meta.get("createdAt")
-            .or_else(|| meta.get("created_at")),
-    );
-    let mut last_ts = timestamp_millis(
-        meta.get("updatedAt")
-            .or_else(|| meta.get("updated_at")),
-    );
+    let mut first_ts = timestamp_millis(meta.get("createdAt").or_else(|| meta.get("created_at")));
+    let mut last_ts = timestamp_millis(meta.get("updatedAt").or_else(|| meta.get("updated_at")));
 
     if let Some(items) = value.get("messages").and_then(Value::as_array) {
         for item in items {
@@ -2135,10 +2118,7 @@ fn parse_zcode_legacy_file(path: &Path, fallback_ts: i64) -> Result<Option<Sessi
                 first_ts = earliest(first_ts, ts);
                 last_ts = last_ts.max(ts);
             }
-            let content = item
-                .get("content")
-                .map(text_value)
-                .unwrap_or_default();
+            let content = item.get("content").map(text_value).unwrap_or_default();
             if role == "user" && title.is_empty() && !content.trim().is_empty() {
                 title = zcode_title(&content);
             }
@@ -2244,7 +2224,10 @@ fn antigravity_roots() -> Vec<PathBuf> {
     if let Ok(entries) = fs::read_dir(gemini) {
         for entry in entries.flatten() {
             let path = entry.path();
-            let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
             if path.is_dir() && name.starts_with("antigravity") {
                 roots.push(path);
             }
@@ -2452,7 +2435,10 @@ fn kiro_root() -> Option<PathBuf> {
 }
 
 fn kiro_cli_files(errors: &mut Vec<String>) -> Vec<PathBuf> {
-    let Some(root) = kiro_root().map(|root| root.join("cli")).filter(|root| root.is_dir()) else {
+    let Some(root) = kiro_root()
+        .map(|root| root.join("cli"))
+        .filter(|root| root.is_dir())
+    else {
         return Vec::new();
     };
     walk_files(&root, errors, |path| {
@@ -2465,7 +2451,10 @@ fn kiro_ide_files(errors: &mut Vec<String>) -> Vec<PathBuf> {
         return Vec::new();
     };
     walk_files(&root, errors, |path| {
-        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
         if name != "messages.jsonl" {
             return false;
         }
@@ -2558,10 +2547,7 @@ fn parse_kiro_cli_file(path: &Path, fallback_ts: i64) -> Result<Option<Session>,
                 }
             }
             "AssistantMessage" => {
-                let message_id = data
-                    .get("message_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
+                let message_id = data.get("message_id").and_then(Value::as_str).unwrap_or("");
                 if !message_id.is_empty() && message_id == last_assistant {
                     continue;
                 }
@@ -3321,10 +3307,7 @@ mod tests {
 
     #[test]
     fn reads_a_deepseek_harness_transcript() {
-        let dir = std::env::temp_dir().join(format!(
-            "sessiontree-test-dsh-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("sessiontree-test-dsh-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("session.v4.jsonl");
         let lines = [
@@ -3367,10 +3350,8 @@ mod tests {
             0x75, 0x13, 0x06, 0x00, 0x2a, 0xa3, 0xec, 0x55, 0x0d, 0x52, 0xaf, 0x4d, 0x42, 0x49,
             0x79, 0x46, 0xd6, 0xab, 0x88, 0x01, 0x43, 0xcc, 0x03, 0xb0,
         ];
-        let dir = std::env::temp_dir().join(format!(
-            "sessiontree-test-dsh-zstd-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("sessiontree-test-dsh-zstd-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("session.v4.jsonl.zstd");
         fs::write(&path, FIXTURE).unwrap();
@@ -3396,7 +3377,11 @@ mod tests {
         ));
         let session = root.join("--tmp-project--").join("abc");
         fs::create_dir_all(&session).unwrap();
-        for name in ["session.jsonl.zstd", "session.v2.jsonl.zstd", "session.v4.jsonl.zstd"] {
+        for name in [
+            "session.jsonl.zstd",
+            "session.v2.jsonl.zstd",
+            "session.v4.jsonl.zstd",
+        ] {
             fs::write(session.join(name), b"").unwrap();
         }
         let files = dsh_files(&root, &mut Vec::new());
@@ -3406,10 +3391,8 @@ mod tests {
     }
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "sessiontree-test-{name}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("sessiontree-test-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -3550,7 +3533,13 @@ mod tests {
             connection
                 .execute(
                     "INSERT INTO session_v2 VALUES(?1,?2,?3,?4,?5)",
-                    rusqlite::params!["v2", "MiMo v2", "/tmp/mimo-v2", 1_700_000_000_000_i64, 1_700_000_100_000_i64],
+                    rusqlite::params![
+                        "v2",
+                        "MiMo v2",
+                        "/tmp/mimo-v2",
+                        1_700_000_000_000_i64,
+                        1_700_000_100_000_i64
+                    ],
                 )
                 .unwrap();
             connection
@@ -3613,7 +3602,9 @@ mod tests {
         .collect::<Vec<_>>()
         .join("\n");
         fs::write(&path, lines).unwrap();
-        let session = parse_antigravity_file(&path, 0).unwrap().expect("a session");
+        let session = parse_antigravity_file(&path, 0)
+            .unwrap()
+            .expect("a session");
         assert_eq!(session.key, "antigravity:sess-a");
         assert_eq!(session.tool, "Antigravity");
         assert_eq!(session.project, "/work/api");
