@@ -48,6 +48,7 @@ fn search_input(
     placeholder: &'static str,
     width: f32,
     test_id: &'static str,
+    handle: Option<&ElementRef>,
 ) -> impl IntoElement {
     view()
         .w(px(width))
@@ -73,8 +74,8 @@ fn search_input(
                         .top(px(5.))
                         .number_of_lines(1)
                 }))
-                .child(
-                    input()
+                .child({
+                    let field = input()
                         .w(relative(1.))
                         .h(px(24.))
                         .test_id(test_id)
@@ -88,8 +89,12 @@ fn search_input(
                                 value.set(String::new());
                             }
                         })
-                        .on_change(move |text: &str| value.set(text.to_owned())),
-                ),
+                        .on_change(move |text: &str| value.set(text.to_owned()));
+                    match handle {
+                        Some(handle) => field.element_ref(handle),
+                        None => field,
+                    }
+                }),
         )
         .child(when(move || !value.get().is_empty(), move || {
             view()
@@ -302,11 +307,20 @@ pub fn App() -> impl IntoElement {
         nsh_core::element::desktop::current_window().set(attributes);
     }
     let s = State::new();
+    let search_field = element_ref();
     let keys = KeyOptions {
         when: When::NotEditing,
         ..Default::default()
     };
     on_key_with("mod+r", keys, move |_| s.scan());
+    on_key_with(
+        "mod+f",
+        KeyOptions {
+            when: When::Always,
+            ..Default::default()
+        },
+        move |_| search_field.focus(),
+    );
     on_key_with("alt+up", keys, move |_| s.up());
     on_key_with("enter", keys, move |_| s.enter(s.selection.get_untracked()));
     on_key_with(
@@ -348,7 +362,7 @@ pub fn App() -> impl IntoElement {
     view()
         .flex_1()
         .bg(rgb(BG))
-        .child(toolbar(s))
+        .child(toolbar(s, &search_field))
         .child(
             view()
                 .h(px(2.))
@@ -389,7 +403,7 @@ pub fn App() -> impl IntoElement {
         .child(when(move || s.share_open.get(), move || share_dialog(s)))
 }
 
-fn toolbar(s: State) -> impl IntoElement {
+fn toolbar(s: State, search_field: &ElementRef) -> impl IntoElement {
     row()
         .test_id("titlebar")
         .h(px(56.))
@@ -407,6 +421,7 @@ fn toolbar(s: State) -> impl IntoElement {
             "Search sessions, projects, models",
             280.,
             "global-search",
+            Some(search_field),
         ))
         .child(view().flex_1())
         .child(
@@ -1578,6 +1593,7 @@ fn project_sessions(s: State) -> impl IntoElement {
             "Search this project",
             240.,
             "project-search",
+            None,
         ))
         .child(each(
             move || sessions.get().0,
@@ -1696,9 +1712,9 @@ fn statusbar(s: State) -> impl IntoElement {
         .child(
             caption(
                 if cfg!(target_os = "macos") {
-                    "⌘R Rescan   ⇧⌘S Share   ⌥↑ Parent   ↑↓ Select   Enter Open   Esc Back"
+                    "⌘F Search   ⌘R Rescan   ⇧⌘S Share   ⌥↑ Parent   ↑↓ Select   Enter Open   Esc Back"
                 } else {
-                    "Ctrl+R Rescan   Ctrl+Shift+S Share   Alt+↑ Parent   ↑↓ Select   Enter Open   Esc Back"
+                    "Ctrl+F Search   Ctrl+R Rescan   Ctrl+Shift+S Share   Alt+↑ Parent   ↑↓ Select   Enter Open   Esc Back"
                 },
                 10.,
                 MUTED,

@@ -147,15 +147,17 @@ pub(crate) fn window_png() -> Result<Vec<u8>, String> {
             return Err(error.to_string());
         }
 
-        let mut info = BITMAPINFO::default();
-        info.bmiHeader = BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: width,
-            biHeight: -height,
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            ..BITMAPINFOHEADER::default()
+        let mut info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..BITMAPINFOHEADER::default()
+            },
+            ..Default::default()
         };
         let mut pixels = vec![0_u8; width as usize * height as usize * 4];
         let lines = GetDIBits(
@@ -172,7 +174,7 @@ pub(crate) fn window_png() -> Result<Vec<u8>, String> {
         if lines == 0 {
             return Err("the captured pixels could not be read".into());
         }
-        for pixel in pixels.chunks_exact_mut(4) {
+        for pixel in pixels.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
             pixel[3] = 255;
         }
