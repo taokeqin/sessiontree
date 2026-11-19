@@ -1,0 +1,44 @@
+[package]
+name = "sessiontree"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+nsh-core = "0.6.0"
+nsh-base = { version = "0.6.0", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+log = "0.4"
+ruzstd = "0.9.1"
+png = "0.17"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nsh-platform-macos = { version = "0.6.0", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nsh-platform-linux = { version = "0.6.0", default-features = false }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+nsh-platform-windows = { version = "0.6.0", default-features = false }
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+nsh-engine = { version = "0.6.0", default-features = false }
+nsh-testing = { version = "0.6.0", default-features = false }
+
+[profile.dev]
+opt-level = 1
+debug-assertions = false
+
+[profile.dev.package."*"]
+opt-level = 3

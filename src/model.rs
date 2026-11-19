@@ -1,0 +1,655 @@
+//! Sessions, aggregates, and the platform-independent treemap geometry.
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// One conversation read from an agent's own on-disk history.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub(crate) struct Session {
+    pub key: String,
+    pub tool: String,
+    pub project: String,
+    pub title: String,
+    pub model: String,
+    pub messages: u64,
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub cost: f64,
+    pub first_ts: i64,
+    pub last_ts: i64,
+    pub file: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Node {
+    pub path: String,
+    pub name: String,
+    pub kind: String,
+    pub tool: String,
+    pub model: String,
+    pub title: String,
+    pub file: String,
+    pub sessions: u64,
+    pub messages: u64,
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub cost: f64,
+    pub first_ts: i64,
+    pub last_ts: i64,
+    pub children: Vec<Arc<Node>>,
+}
+
+impl Node {
+    pub fn tokens(&self) -> u64 {
+        self.input + self.output
+    }
+    pub fn cache(&self) -> u64 {
+        self.cache_read + self.cache_write
+    }
+    pub fn is_leaf(&self) -> bool {
+        self.children.is_empty()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Metric {
+    #[default]
+    Tokens,
+    Cost,
+    Messages,
+}
+
+impl Metric {
+    pub fn weight(self, node: &Node) -> f64 {
+        (match self {
+            Self::Tokens => node.tokens() as f64,
+            Self::Cost => node.cost,
+            Self::Messages => node.messages as f64,
+        })
+        .max(1e-6)
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Tokens => "Tokens",
+            Self::Cost => "Cost",
+            Self::Messages => "Messages",
+        }
+    }
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::Tokens => "Tile area = input + output tokens",
+            Self::Cost => "Tile area = cost in USD",
+            Self::Messages => "Tile area = messages",
+        }
+    }
+    pub fn value(self, node: &Node) -> String {
+        match self {
+            Self::Tokens => compact(node.tokens()),
+            Self::Cost => money(node.cost),
+            Self::Messages => count(node.messages),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Snapshot {
+    pub root: Node,
+    pub errors: Vec<String>,
+    pub scanned_ms: u64,
+    pub cache_hits: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Progress {
+    pub done: u64,
+    pub total: u64,
+    pub sessions: u64,
+    pub phase: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Tile {
+    pub node: Arc<Node>,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub depth: u8,
+}
+
+const MASK_COLORS: [u32; 9] = [
+    0xe08b55, 0x63d2a4, 0x7aa7e8, 0xb48ce0, 0x6fc2cf, 0xe0c765, 0x5b8def, 0xf0a35e, 0x9bd86a,
+];
+
+pub(crate) fn agent_color(tool: &str) -> u32 {
+    if let Some(index) = tool
+        .strip_prefix("Agent ")
+        .and_then(|number| number.parse::<usize>().ok())
+    {
+        return MASK_COLORS[(index - 1) % MASK_COLORS.len()];
+    }
+    match tool {
+        "Claude Code" => 0xe08b55,
+        "OpenCode" => 0x63d2a4,
+        "Codex" => 0x7aa7e8,
+        "Cursor" => 0xb48ce0,
+        "Copilot" => 0x6fc2cf,
+        "Pi" => 0xe0c765,
+        "DeepSeek" => 0x5b8def,
+        "ZCode" => 0x8a7cf0,
+        "MiMo" => 0xf0a35e,
+        "Antigravity" => 0x9bd86a,
+        "Kiro" => 0xff8a65,
+        _ => 0x8d93a1,
+    }
+}
+
+/// The agent's hue identifies the tool; depth and name only tint it.
+pub(crate) fn tile_color(node: &Node, depth: u8) -> u32 {
+    let base = agent_color(&node.tool);
+    let hash = node
+        .name
+        .encode_utf16()
+        .fold(0_i32, |h, c| h.wrapping_mul(31).wrapping_add(c as i32));
+    let jitter = (hash.unsigned_abs() % 13) as i32 - 6;
+    let lift = (depth.saturating_sub(1) as i32) * 5 + jitter;
+    let channel =
+        |shift: u32| ((((base >> shift) & 255) as i32 + lift).clamp(0, 255) as u32) << shift;
+    channel(16) | channel(8) | channel(0)
+}
+
+/// Balanced subdivision preserves area and bounds the work to the supplied view.
+/// Keep the map readable and the element count bounded on very large projects.
+pub(crate) const MAP_BUDGET: usize = 240;
+
+/// The children the map and the contents list should show. A project with
+/// thousands of sessions contributes its largest ones; the parent tile still
+/// carries the project's full weight, so the outer map remains truthful while
+/// the inner view stays readable.
+pub(crate) fn bounded_children(node: &Node, metric: Metric) -> Vec<Arc<Node>> {
+    if node.children.len() <= MAP_BUDGET {
+        return node.children.clone();
+    }
+    let mut children = node.children.clone();
+    children.sort_by(|a, b| {
+        metric
+            .weight(b)
+            .partial_cmp(&metric.weight(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    children.truncate(MAP_BUDGET);
+    children
+}
+
+pub(crate) fn mosaic(
+    nodes: &[Arc<Node>],
+    width: f32,
+    height: f32,
+    metric: Metric,
+    levels: u8,
+) -> Vec<Tile> {
+    fn ordered(nodes: &[Arc<Node>], metric: Metric) -> Vec<&Arc<Node>> {
+        let mut nodes: Vec<_> = nodes.iter().filter(|n| metric.weight(n) > 0.0).collect();
+        nodes.sort_by(|a, b| {
+            metric
+                .weight(b)
+                .partial_cmp(&metric.weight(a))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        nodes
+    }
+    fn split(
+        nodes: &[&Arc<Node>],
+        rect: [f32; 4],
+        metric: Metric,
+        levels: u8,
+        depth: u8,
+        out: &mut Vec<Tile>,
+    ) {
+        let [x, y, width, height] = rect;
+        if nodes.is_empty() || width < 2.0 || height < 2.0 {
+            return;
+        }
+        if nodes.len() == 1 {
+            let node = nodes[0];
+            out.push(Tile {
+                node: Arc::clone(node),
+                x,
+                y,
+                width,
+                height,
+                depth,
+            });
+            if depth < levels && !node.children.is_empty() && width > 90.0 && height > 65.0 {
+                split(
+                    &ordered(&bounded_children(node, metric), metric),
+                    [
+                        x + 3.0,
+                        y + 25.0,
+                        (width - 6.0).max(1.0),
+                        (height - 28.0).max(1.0),
+                    ],
+                    metric,
+                    levels,
+                    depth + 1,
+                    out,
+                );
+            }
+            return;
+        }
+        let total: f64 = nodes.iter().map(|n| metric.weight(n)).sum();
+        let mut sum = 0.0;
+        let mut at = 0;
+        while at < nodes.len() - 1 && sum < total / 2.0 {
+            sum += metric.weight(nodes[at]);
+            at += 1;
+        }
+        let ratio = (sum / total) as f32;
+        let (first, second) = if width >= height {
+            (
+                [x, y, width * ratio, height],
+                [x + width * ratio, y, width * (1.0 - ratio), height],
+            )
+        } else {
+            (
+                [x, y, width, height * ratio],
+                [x, y + height * ratio, width, height * (1.0 - ratio)],
+            )
+        };
+        split(&nodes[..at], first, metric, levels, depth, out);
+        split(&nodes[at..], second, metric, levels, depth, out);
+    }
+    let mut result = Vec::new();
+    split(
+        &ordered(nodes, metric),
+        [0.0, 0.0, width, height],
+        metric,
+        levels,
+        1,
+        &mut result,
+    );
+    result
+}
+
+pub(crate) fn build_tree(sessions: Vec<Session>, errors: Vec<String>, scanned_ms: u64) -> Snapshot {
+    let mut by_tool: BTreeMap<String, Vec<Session>> = BTreeMap::new();
+    for session in sessions {
+        by_tool
+            .entry(session.tool.clone())
+            .or_default()
+            .push(session);
+    }
+    let mut agents = Vec::new();
+    for (tool, sessions) in by_tool {
+        let mut by_project: BTreeMap<String, Vec<Session>> = BTreeMap::new();
+        for session in sessions {
+            by_project
+                .entry(session.project.clone())
+                .or_default()
+                .push(session);
+        }
+        let mut projects = Vec::new();
+        for (project, sessions) in by_project {
+            let project_path = format!("agent:{}|project:{}", tool, project);
+            let mut node = Node {
+                path: project_path.clone(),
+                name: if project.is_empty() {
+                    "(unknown project)".into()
+                } else {
+                    basename(&project)
+                },
+                kind: "project".into(),
+                tool: tool.clone(),
+                title: project.clone(),
+                ..Default::default()
+            };
+            for session in sessions {
+                let mut leaf = Node {
+                    path: format!("{}|session:{}", project_path, session.key),
+                    name: display_title(&session.title, &session.key),
+                    kind: "session".into(),
+                    tool: session.tool.clone(),
+                    model: session.model.clone(),
+                    title: session.title.clone(),
+                    file: session.file.clone(),
+                    ..Default::default()
+                };
+                absorb(&mut leaf, &session);
+                leaf.sessions = 1;
+                absorb(&mut node, &session);
+                node.children.push(Arc::new(leaf));
+            }
+            node.children.sort_by(|a, b| {
+                b.tokens()
+                    .cmp(&a.tokens())
+                    .then_with(|| b.last_ts.cmp(&a.last_ts))
+            });
+            node.sessions = node.children.len() as u64;
+            projects.push(node);
+        }
+        let mut node = Node {
+            path: format!("agent:{}", tool),
+            name: tool.clone(),
+            kind: "agent".into(),
+            tool: tool.clone(),
+            ..Default::default()
+        };
+        for project in projects {
+            node.sessions += project.sessions;
+            node.messages += project.messages;
+            node.input += project.input;
+            node.output += project.output;
+            node.cache_read += project.cache_read;
+            node.cache_write += project.cache_write;
+            node.cost += project.cost;
+            node.first_ts = earliest(node.first_ts, project.first_ts);
+            node.last_ts = node.last_ts.max(project.last_ts);
+            node.children.push(Arc::new(project));
+        }
+        node.children.sort_by(|a, b| {
+            b.tokens()
+                .cmp(&a.tokens())
+                .then_with(|| b.last_ts.cmp(&a.last_ts))
+        });
+        agents.push(node);
+    }
+    agents.sort_by(|a, b| {
+        b.tokens()
+            .cmp(&a.tokens())
+            .then_with(|| b.last_ts.cmp(&a.last_ts))
+    });
+    let mut root = Node {
+        path: "root".into(),
+        name: "All sessions".into(),
+        kind: "root".into(),
+        ..Default::default()
+    };
+    for agent in agents {
+        root.sessions += agent.sessions;
+        root.messages += agent.messages;
+        root.input += agent.input;
+        root.output += agent.output;
+        root.cache_read += agent.cache_read;
+        root.cache_write += agent.cache_write;
+        root.cost += agent.cost;
+        root.first_ts = earliest(root.first_ts, agent.first_ts);
+        root.last_ts = root.last_ts.max(agent.last_ts);
+        root.children.push(Arc::new(agent));
+    }
+    Snapshot {
+        root,
+        errors,
+        scanned_ms,
+        cache_hits: 0,
+    }
+}
+
+fn absorb(node: &mut Node, session: &Session) {
+    node.messages += session.messages;
+    node.input += session.input;
+    node.output += session.output;
+    node.cache_read += session.cache_read;
+    node.cache_write += session.cache_write;
+    node.cost += session.cost;
+    node.first_ts = earliest(node.first_ts, session.first_ts);
+    node.last_ts = node.last_ts.max(session.last_ts);
+    if node.model.is_empty() && !session.model.is_empty() {
+        node.model = session.model.clone();
+    }
+}
+
+fn earliest(current: i64, candidate: i64) -> i64 {
+    if candidate <= 0 {
+        current
+    } else if current <= 0 {
+        candidate
+    } else {
+        current.min(candidate)
+    }
+}
+
+fn display_title(title: &str, key: &str) -> String {
+    let text = title.trim();
+    if text.is_empty() {
+        key.rsplit(':')
+            .next()
+            .unwrap_or("untitled session")
+            .to_owned()
+    } else {
+        text.chars().take(70).collect()
+    }
+}
+
+pub(crate) fn find<'a>(node: &'a Node, path: &str) -> Option<&'a Node> {
+    if node.path == path {
+        return Some(node);
+    }
+    node.children.iter().find_map(|child| find(child, path))
+}
+
+pub(crate) fn ancestors(node: &Node, path: &str) -> Vec<Node> {
+    fn walk(node: &Node, path: &str, trail: &mut Vec<Node>) -> bool {
+        trail.push(node.clone());
+        if node.path == path {
+            return true;
+        }
+        for child in &node.children {
+            if walk(child, path, trail) {
+                return true;
+            }
+        }
+        trail.pop();
+        false
+    }
+    let mut trail = Vec::new();
+    if walk(node, path, &mut trail) {
+        trail
+    } else {
+        Vec::new()
+    }
+}
+
+pub(crate) fn basename(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    trimmed
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(trimmed)
+        .to_owned()
+}
+
+static HIDE_NUMBERS: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn set_hide_numbers(hide: bool) {
+    HIDE_NUMBERS.store(hide, Ordering::Relaxed);
+}
+
+pub(crate) fn numbers_hidden() -> bool {
+    HIDE_NUMBERS.load(Ordering::Relaxed)
+}
+
+pub(crate) fn count(value: u64) -> String {
+    if numbers_hidden() {
+        return "•••".into();
+    }
+    let digits = value.to_string();
+    let mut result = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(digit);
+    }
+    result
+}
+
+pub(crate) fn compact(value: u64) -> String {
+    if numbers_hidden() {
+        return "•••".into();
+    }
+    let value = value as f64;
+    let (scaled, unit) = if value >= 1_000_000_000.0 {
+        (value / 1_000_000_000.0, "B")
+    } else if value >= 1_000_000.0 {
+        (value / 1_000_000.0, "M")
+    } else if value >= 1_000.0 {
+        (value / 1_000.0, "K")
+    } else {
+        (value, "")
+    };
+    if unit.is_empty() {
+        format!("{value:.0}")
+    } else if scaled >= 100.0 {
+        format!("{scaled:.0}{unit}")
+    } else {
+        format!("{scaled:.1}{unit}")
+    }
+}
+
+pub(crate) fn money(value: f64) -> String {
+    if numbers_hidden() {
+        return "•••".into();
+    }
+    if value <= 0.0 {
+        "$0.00".into()
+    } else if value < 0.01 {
+        "<$0.01".into()
+    } else if value < 1.0 {
+        format!("${value:.3}")
+    } else {
+        format!("${value:.2}")
+    }
+}
+
+fn date(ts: i64) -> String {
+    if ts <= 0 {
+        return "—".into();
+    }
+    chrono::DateTime::from_timestamp_millis(ts)
+        .map(|time| time.with_timezone(&chrono::Local))
+        .map(|time| time.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "—".into())
+}
+
+pub(crate) fn stamp(ts: i64) -> String {
+    if ts <= 0 {
+        return "—".into();
+    }
+    chrono::DateTime::from_timestamp_millis(ts)
+        .map(|time| time.with_timezone(&chrono::Local))
+        .map(|time| time.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "—".into())
+}
+
+pub(crate) fn span(first: i64, last: i64) -> String {
+    if first <= 0 || last <= 0 {
+        return "—".into();
+    }
+    let start = date(first);
+    let end = date(last);
+    if start == end {
+        start
+    } else {
+        format!("{start} → {end}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(name: &str, tokens: u64, messages: u64) -> Node {
+        Node {
+            name: name.into(),
+            path: name.into(),
+            kind: "session".into(),
+            messages,
+            input: tokens,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn subdivision_preserves_area_and_follows_metric() {
+        let nodes = vec![Arc::new(node("a", 9, 1)), Arc::new(node("b", 1, 9))];
+        let tokens = mosaic(&nodes, 100.0, 80.0, Metric::Tokens, 1);
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0].node.name, "a");
+        let area: f32 = tokens.iter().map(|t| t.width * t.height).sum();
+        assert!((area - 8000.0).abs() < 0.01);
+        let messages = mosaic(&nodes, 100.0, 80.0, Metric::Messages, 1);
+        assert_eq!(messages[0].node.name, "b");
+    }
+
+    #[test]
+    fn tree_groups_agent_then_project_then_session() {
+        let sessions = vec![
+            Session {
+                key: "one".into(),
+                tool: "Claude Code".into(),
+                project: "/tmp/a".into(),
+                title: "first".into(),
+                input: 10,
+                ..Default::default()
+            },
+            Session {
+                key: "two".into(),
+                tool: "OpenCode".into(),
+                project: "/tmp/a".into(),
+                title: "second".into(),
+                output: 30,
+                ..Default::default()
+            },
+        ];
+        let snapshot = build_tree(sessions, Vec::new(), 0);
+        assert_eq!(snapshot.root.sessions, 2);
+        assert_eq!(snapshot.root.children.len(), 2);
+        let agent = find(&snapshot.root, "agent:Claude Code").expect("agent node");
+        assert_eq!(agent.sessions, 1);
+        let project = find(&snapshot.root, "agent:Claude Code|project:/tmp/a");
+        assert_eq!(project.expect("project node").name, "a");
+        assert_eq!(ancestors(&snapshot.root, agent.path.as_str()).len(), 2);
+    }
+
+    #[test]
+    fn large_projects_are_capped_without_losing_the_parent_weight() {
+        let children: Vec<Arc<Node>> = (0..MAP_BUDGET + 30)
+            .map(|index| Arc::new(node(&format!("s{index}"), index as u64 + 1, 1)))
+            .collect();
+        let parent = Node {
+            path: "project".into(),
+            kind: "project".into(),
+            input: (0..MAP_BUDGET + 30).map(|n| n as u64 + 1).sum(),
+            sessions: (MAP_BUDGET + 30) as u64,
+            children,
+            ..Default::default()
+        };
+        let bounded = bounded_children(&parent, Metric::Tokens);
+        assert_eq!(bounded.len(), MAP_BUDGET);
+        assert!(bounded.iter().all(|child| child.name != "s0"));
+        let tiles = mosaic(&[Arc::new(parent)], 900.0, 700.0, Metric::Tokens, 3);
+        assert!(tiles.len() <= MAP_BUDGET + 1);
+    }
+
+    #[test]
+    fn cost_metric_keeps_zero_cost_sessions_tiny() {
+        let nodes = vec![
+            Arc::new(node("free", 100, 1)),
+            Arc::new(node("paid", 100, 1)),
+        ];
+        let tiles = mosaic(&nodes, 100.0, 80.0, Metric::Cost, 1);
+        assert_eq!(tiles.len(), 2);
+        assert!(
+            tiles
+                .iter()
+                .all(|tile| tile.width > 0.0 && tile.height > 0.0)
+        );
+    }
+}

@@ -1,0 +1,6 @@
+.nsh/
+target/
+
+dist/
+.DS_Store
+*.log

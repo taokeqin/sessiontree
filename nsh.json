@@ -1,0 +1,9 @@
+{
+  "name": "Sessiontree",
+  "id": "com.hacken.sessiontree",
+  "version": "0.1.0",
+  "build": 1,
+  "appearance": "dark",
+  "rust": ".",
+  "root": "App"
+}
