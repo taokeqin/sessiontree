@@ -25,6 +25,12 @@ Sessiontree is passive: it only reads local stores, never proxies or uploads.
 Sessions are weighted by **tokens**, **cost** or **messages**. Costs use a built-in
 price table, including DeepSeek, GLM, MiMo, Qwen and Kimi model ids.
 
+## Search
+
+The toolbar field searches every agent, project, session title, model id and file path
+on the machine. Results stay in the right panel; selecting a project opens its details
+with a searchable session list.
+
 ## Share screenshots
 
 The toolbar's share button (⇧⌘S / Ctrl+Shift+S) captures the window exactly as shown

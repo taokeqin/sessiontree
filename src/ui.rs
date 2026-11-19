@@ -1,6 +1,6 @@
 //! Native Rust components for the session treemap.
 use crate::{model::*, state::State};
-use nsh_base::{dialog, nav_page, nav_stack};
+use nsh_base::{dialog, input, nav_page, nav_stack, tooltip};
 use nsh_core::{
     AccessibilityRole,
     canvas::{LineCap, LineJoin},
@@ -28,6 +28,82 @@ fn caption(value: impl IntoReactive<SharedString>, size: f32, color: u32) -> Tex
         .font_family(MONO)
         .text_size(px(size))
         .text_color(rgb(color))
+}
+
+fn tip(text: &'static str) -> impl IntoTooltip {
+    tooltip().child(
+        view()
+            .px(px(8.))
+            .py(px(5.))
+            .rounded(px(6.))
+            .bg(rgb(0x1c1c22))
+            .border_1()
+            .border_color(rgb(0x3a3a42))
+            .child(caption(text, 10., INK).number_of_lines(1)),
+    )
+}
+
+fn search_input(
+    value: Signal<String>,
+    placeholder: &'static str,
+    width: f32,
+    test_id: &'static str,
+) -> impl IntoElement {
+    view()
+        .w(px(width))
+        .h(px(28.))
+        .flex_row()
+        .items_center()
+        .gap(px(6.))
+        .px(px(8.))
+        .rounded(px(7.))
+        .border_1()
+        .border_color(rgb(0x2f2f36))
+        .bg(rgb(0x141418))
+        .window_drag(false)
+        .child(caption("⌕", 12., MUTED))
+        .child(
+            view()
+                .flex_1()
+                .h(px(24.))
+                .child(when(move || value.get().is_empty(), move || {
+                    caption(placeholder, 11., MUTED)
+                        .absolute()
+                        .left(px(4.))
+                        .top(px(5.))
+                        .number_of_lines(1)
+                }))
+                .child(
+                    input()
+                        .w(relative(1.))
+                        .h(px(24.))
+                        .test_id(test_id)
+                        .value(move || value.get())
+                        .placeholder("")
+                        .caret_color(rgb(GREEN))
+                        .selection_color(rgba(0x65f19340))
+                        .text_color(rgb(INK))
+                        .on_key_press(move |key: &str| {
+                            if key == "escape" {
+                                value.set(String::new());
+                            }
+                        })
+                        .on_change(move |text: &str| value.set(text.to_owned())),
+                ),
+        )
+        .child(when(move || !value.get().is_empty(), move || {
+            view()
+                .role(AccessibilityRole::Button)
+                .label("Clear search")
+                .w(px(18.))
+                .h(px(18.))
+                .rounded(px(4.))
+                .items_center()
+                .justify_center()
+                .hover(|v| v.bg(rgb(0x1f1f24)))
+                .on_press(move |_: &()| value.set(String::new()))
+                .child(caption("✕", 10., MUTED))
+        }))
 }
 
 fn row() -> View {
@@ -239,7 +315,15 @@ pub fn App() -> impl IntoElement {
             when: When::Always,
             ..Default::default()
         },
-        move |_| s.close(),
+        move |_| {
+            if !s.query.get_untracked().is_empty() {
+                s.query.set(String::new());
+            } else if !s.project_query.get_untracked().is_empty() {
+                s.project_query.set(String::new());
+            } else {
+                s.close();
+            }
+        },
     );
     on_key_with("mod+shift+s", keys, move |_| s.share_open.set(true));
     for (key, delta) in [("down", 1_isize), ("up", -1)] {
@@ -318,25 +402,40 @@ fn toolbar(s: State) -> impl IntoElement {
         .window_drag(true)
         .child(app_mark())
         .child(caption("sessiontree", 17., INK).font_weight(FontWeight::SEMIBOLD))
+        .child(search_input(
+            s.query,
+            "Search sessions, projects, models",
+            280.,
+            "global-search",
+        ))
         .child(view().flex_1())
-        .child(control(
-            "Share image",
-            Some("↗"),
-            move || s.busy.get(),
-            move || s.share_open.set(true),
-        ))
-        .child(control(
-            "Rescan sessions",
-            Some("⟳"),
-            move || s.busy.get(),
-            move || s.scan(),
-        ))
-        .child(control(
-            "Up one level",
-            Some("↑"),
-            move || s.busy.get() || s.scope.get() == "root",
-            move || s.up(),
-        ))
+        .child(
+            control(
+                "Share image",
+                Some("↗"),
+                move || s.busy.get(),
+                move || s.share_open.set(true),
+            )
+            .tooltip(tip("Share a screenshot (⇧⌘S)")),
+        )
+        .child(
+            control(
+                "Rescan sessions",
+                Some("⟳"),
+                move || s.busy.get(),
+                move || s.scan(),
+            )
+            .tooltip(tip("Rescan local sessions (⌘R)")),
+        )
+        .child(
+            control(
+                "Up one level",
+                Some("↑"),
+                move || s.busy.get() || s.scope.get() == "root",
+                move || s.up(),
+            )
+            .tooltip(tip("Up one level (⌥↑)")),
+        )
         .child(view().w(px(1.)).h(px(20.)).mx(px(4.)).bg(rgb(LINE)))
         .child(
             row()
@@ -890,6 +989,9 @@ fn share_toggle(
 
 fn sidebar(s: State) -> impl IntoElement {
     let details = computed(move || {
+        if !s.query.get().trim().is_empty() {
+            return false;
+        }
         let selection = s.selection.get();
         !selection.path.is_empty() && selection.path != s.scope.get()
     });
@@ -997,6 +1099,19 @@ fn scope_summary(s: State) -> impl IntoElement {
 }
 
 fn contents_page(s: State) -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(when(
+            move || !s.query.get().trim().is_empty(),
+            move || search_contents(s),
+        ))
+        .child(when(
+            move || s.query.get().trim().is_empty(),
+            move || browse_contents(s),
+        ))
+}
+
+fn browse_contents(s: State) -> impl IntoElement {
     scroll().flex_1().child(
         view()
             .p(px(14.))
@@ -1052,6 +1167,161 @@ fn contents_page(s: State) -> impl IntoElement {
                 },
             )),
     )
+}
+
+fn search_hits(root: &Node, query: &str, metric: Metric) -> Vec<Arc<Node>> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let score = |node: &Node| -> u8 {
+        let name = node.name.to_lowercase();
+        if name.starts_with(&query) {
+            3
+        } else if name.contains(&query) {
+            2
+        } else {
+            let extra = if node.kind == "session" {
+                format!("{} {} {}", node.title, node.model, node.file)
+            } else if node.kind == "project" {
+                node.title.clone()
+            } else {
+                String::new()
+            };
+            if extra.to_lowercase().contains(&query) {
+                1
+            } else {
+                0
+            }
+        }
+    };
+    let mut hits: Vec<(u8, Arc<Node>)> = Vec::new();
+    for agent in &root.children {
+        let agent_score = score(agent);
+        if agent_score > 0 {
+            hits.push((agent_score, agent.clone()));
+        }
+        for project in &agent.children {
+            let project_score = score(project);
+            if project_score > 0 {
+                hits.push((project_score, project.clone()));
+            }
+            for session in &project.children {
+                let session_score = score(session);
+                if session_score > 0 {
+                    hits.push((session_score, session.clone()));
+                }
+            }
+        }
+    }
+    hits.sort_by(|a, b| {
+        b.0.cmp(&a.0).then_with(|| {
+            metric
+                .weight(&b.1)
+                .partial_cmp(&metric.weight(&a.1))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+    hits.truncate(60);
+    hits.into_iter().map(|(_, node)| node).collect()
+}
+
+fn search_contents(s: State) -> impl IntoElement {
+    let hits = computed(move || {
+        search_hits(&s.snapshot.get().root, &s.query.get(), s.metric.get())
+    });
+    scroll().flex_1().child(
+        view()
+            .p(px(14.))
+            .gap(px(8.))
+            .child(
+                row()
+                    .justify_between()
+                    .child(caption("SEARCH", 10., MUTED))
+                    .child(caption(
+                        move || format!("{} results", hits.get().len()),
+                        10.,
+                        MUTED,
+                    )),
+            )
+            .child(each(
+                move || hits.get(),
+                |node| node.path.clone(),
+                move |node, _| search_row(s, node),
+            ))
+            .child(when(move || hits.get().is_empty(), move || {
+                view()
+                    .py(px(18.))
+                    .items_center()
+                    .child(caption("No matching agents, projects or sessions.", 11., MUTED))
+            })),
+    )
+}
+
+fn search_row(s: State, node: ReadSignal<Arc<Node>>) -> impl IntoElement {
+    view()
+        .py(px(6.))
+        .px(px(5.))
+        .gap(px(3.))
+        .rounded(px(4.))
+        .hover(|s| s.bg(rgb(0x1a1a1e)))
+        .role(AccessibilityRole::Button)
+        .label(move || format!("Open {}", node.get().name))
+        .on_press(move |_: &()| {
+            let node = (*node.get_untracked()).clone();
+            s.query.set(String::new());
+            if node.kind == "agent" {
+                s.enter(node);
+            } else {
+                s.choose(node);
+            }
+        })
+        .child(
+            row()
+                .gap(px(6.))
+                .child(
+                    view()
+                        .w(px(3.))
+                        .h(px(16.))
+                        .bg(move || rgb(tile_color(&node.get(), 1))),
+                )
+                .child(
+                    view()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .gap(px(2.))
+                        .child(
+                            caption(move || node.get().name.clone(), 11., INK)
+                                .number_of_lines(1),
+                        )
+                        .child(
+                            caption(
+                                move || {
+                                    let node = node.get();
+                                    if node.kind == "session" {
+                                        if node.model.is_empty() {
+                                            node.title.clone()
+                                        } else {
+                                            format!("{} · {}", node.tool, node.model)
+                                        }
+                                    } else if node.kind == "project" {
+                                        format!("{} · {} sessions", node.tool, count(node.sessions))
+                                    } else {
+                                        format!("Agent · {} projects", count(node.children.len() as u64))
+                                    }
+                                },
+                                9.,
+                                MUTED,
+                            )
+                            .number_of_lines(1),
+                        ),
+                )
+                .child(caption(
+                    move || s.metric.get().value(&node.get()),
+                    10.,
+                    MUTED,
+                )),
+        )
 }
 
 fn child_row(s: State, node: ReadSignal<Arc<Node>>) -> impl IntoElement {
@@ -1236,6 +1506,10 @@ fn details_page(s: State) -> impl IntoElement {
                     }
                 })),
             )
+            .child(when(
+                move || node().kind == "project",
+                move || project_sessions(s),
+            ))
             .child(caption(move || node().file, 9., MUTED).number_of_lines(3))
             .child(when(
                 move || node().kind != "session",
@@ -1248,6 +1522,74 @@ fn details_page(s: State) -> impl IntoElement {
                 },
             )),
     )
+}
+
+fn project_sessions(s: State) -> impl IntoElement {
+    let sessions = computed(move || {
+        let node = s.selection.get();
+        let query = s.project_query.get().trim().to_lowercase();
+        let metric = s.metric.get();
+        let mut list: Vec<Arc<Node>> = node
+            .children
+            .iter()
+            .filter(|session| {
+                query.is_empty()
+                    || session.name.to_lowercase().contains(&query)
+                    || session.title.to_lowercase().contains(&query)
+                    || session.model.to_lowercase().contains(&query)
+                    || session.file.to_lowercase().contains(&query)
+            })
+            .cloned()
+            .collect();
+        list.sort_by(|a, b| {
+            metric
+                .weight(b)
+                .partial_cmp(&metric.weight(a))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let total = list.len();
+        list.truncate(120);
+        (list, total)
+    });
+    view()
+        .gap(px(7.))
+        .pt(px(9.))
+        .border_t_1()
+        .border_color(rgb(LINE))
+        .child(
+            row()
+                .justify_between()
+                .child(caption("SESSIONS", 10., MUTED))
+                .child(caption(
+                    move || {
+                        let (list, total) = sessions.get();
+                        if total > list.len() {
+                            format!("{} of {}", list.len(), count(total as u64))
+                        } else {
+                            count(total as u64)
+                        }
+                    },
+                    9.,
+                    MUTED,
+                )),
+        )
+        .child(search_input(
+            s.project_query,
+            "Search this project",
+            240.,
+            "project-search",
+        ))
+        .child(each(
+            move || sessions.get().0,
+            |node| node.path.clone(),
+            move |node, _| child_row(s, node),
+        ))
+        .child(when(move || sessions.get().0.is_empty(), move || {
+            view()
+                .py(px(14.))
+                .items_center()
+                .child(caption("No sessions match this search.", 10., MUTED))
+        }))
 }
 
 fn sources_footer(s: State) -> impl IntoElement {

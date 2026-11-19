@@ -26,6 +26,8 @@ pub(crate) struct State {
     pub share_busy: Signal<bool>,
     pub share_status: Signal<String>,
     pub map_frame: Signal<(f32, f32)>,
+    pub query: Signal<String>,
+    pub project_query: Signal<String>,
 }
 
 impl State {
@@ -54,6 +56,8 @@ impl State {
                 "Captures this window. Nothing leaves this machine.".into(),
             ),
             map_frame: signal((700.0, 520.0)),
+            query: signal(String::new()),
+            project_query: signal(String::new()),
         }
     }
 
@@ -132,6 +136,9 @@ impl State {
         if self.selection.get_untracked().path == node.path {
             self.enter(node);
         } else {
+            if node.kind == "project" && self.selection.get_untracked().path != node.path {
+                self.project_query.set(String::new());
+            }
             self.selection.set(node);
         }
     }

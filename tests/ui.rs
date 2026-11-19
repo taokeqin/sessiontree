@@ -142,5 +142,19 @@ fn rust_ui_scans_and_drills_into_sessions() {
     ui.press("label:Project names").unwrap();
     ui.press("label:Cancel").unwrap();
 
+    // Global search reaches every project and session.
+    ui.type_text("id:global-search", "project-x").unwrap();
+    ui.wait_for("text:SEARCH").unwrap();
+    ui.press("label:Clear search").unwrap();
+
+    // A selected project shows its sessions in the right panel, searchable.
+    ui.press("label:Go to All sessions").unwrap();
+    ui.press("label:Open Claude Code").unwrap();
+    ui.wait_for("label:Open project-x").unwrap();
+    ui.press("label:project-x").unwrap();
+    ui.wait_for("text:Search this project").unwrap();
+    ui.type_text("id:project-search", "fix").unwrap();
+    ui.wait_for("text:fix the tests").unwrap();
+
     drop(fixture);
 }
