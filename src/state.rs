@@ -33,6 +33,7 @@ pub(crate) struct State {
     pub map_frame: Signal<(f32, f32)>,
     pub query: Signal<String>,
     pub project_query: Signal<String>,
+    pub compare_open: Signal<bool>,
 }
 
 impl State {
@@ -61,6 +62,7 @@ impl State {
             map_frame: signal((700.0, 520.0)),
             query: signal(String::new()),
             project_query: signal(String::new()),
+            compare_open: signal(false),
         }
     }
 

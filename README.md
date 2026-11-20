@@ -23,6 +23,13 @@ The masked window is captured and the real data is restored immediately afterwar
 screenshot above was taken this way: names are masked, so it is safe to paste into a PR,
 an issue or a chat. Nothing is uploaded anywhere.
 
+## Compare agents
+
+The bar-chart button in the toolbar compares every agent side by side: sessions, input,
+output, cache, cost, messages and each agent's share of the selected metric. Switch the
+metric inside the dialog, or click a row to drill into that agent. Values are masked too
+when you share the window.
+
 ## What it reads
 
 Sessiontree is passive: it only reads local stores, never proxies or uploads.

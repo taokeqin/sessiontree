@@ -142,6 +142,11 @@ fn rust_ui_scans_and_drills_into_sessions() {
     ui.press("label:Project names").unwrap();
     ui.press("label:Cancel").unwrap();
 
+    // The compare sheet puts every agent side by side.
+    ui.press("label:Compare agents").unwrap();
+    ui.wait_for("text:TOTAL").unwrap();
+    ui.press("label:Close compare").unwrap();
+
     // Global search reaches every project and session.
     ui.type_text("id:global-search", "project-x").unwrap();
     ui.wait_for("text:SEARCH").unwrap();

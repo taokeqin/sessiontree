@@ -193,6 +193,7 @@ fn icon(glyph: &str) -> impl IntoElement {
         "↑" => "M12 19V5M5 12l7-7 7 7",
         "‹" => "M15 6l-6 6 6 6",
         "↗" => "M7 17L17 7M9 7h8v8",
+        "▥" => "M5 20V10M12 20V4M19 20v-7",
         _ => "M4 20h4L18.5 9.5a2.828 2.828 0 1 0-4-4L4 16v4M13.5 6.5l4 4",
     };
     canvas(
@@ -407,6 +408,10 @@ pub fn App() -> impl IntoElement {
         )
         .child(statusbar(s))
         .child(when(move || s.share_open.get(), move || share_dialog(s)))
+        .child(when(
+            move || s.compare_open.get(),
+            move || compare_dialog(s),
+        ))
 }
 
 fn toolbar(s: State, search_field: &ElementRef) -> impl IntoElement {
@@ -456,6 +461,15 @@ fn toolbar(s: State, search_field: &ElementRef) -> impl IntoElement {
                 move || s.up(),
             )
             .tooltip(tip("Up one level (⌥↑)")),
+        )
+        .child(
+            control(
+                "Compare agents",
+                Some("▥"),
+                move || s.busy.get(),
+                move || s.compare_open.set(true),
+            )
+            .tooltip(tip("Compare agent usage")),
         )
         .child(view().w(px(1.)).h(px(20.)).mx(px(4.)).bg(rgb(LINE)))
         .child(
@@ -812,6 +826,284 @@ fn map_tile(s: State, tile: ReadSignal<Tile>) -> impl IntoElement {
         ))
 }
 
+fn compare_number(value: impl IntoReactive<SharedString>, width: f32) -> impl IntoElement {
+    view()
+        .w(px(width))
+        .flex_row()
+        .justify_end()
+        .child(caption(value, 10., MUTED))
+}
+
+fn compare_head(label: &'static str, width: f32) -> impl IntoElement {
+    view()
+        .w(px(width))
+        .flex_row()
+        .justify_end()
+        .child(caption(label, 9., MUTED))
+}
+
+fn compare_metric_tabs(s: State) -> impl IntoElement {
+    row()
+        .gap(px(2.))
+        .p(px(3.))
+        .rounded(px(8.))
+        .bg(rgb(0x0b0b0d))
+        .border_1()
+        .border_color(rgb(LINE))
+        .children(
+            [Metric::Tokens, Metric::Cost, Metric::Messages]
+                .into_iter()
+                .map(move |metric| {
+                    view()
+                        .role(AccessibilityRole::Tab)
+                        .label(metric.label())
+                        .accessibility_state(move || nsh_core::AccessibilityState {
+                            selected: s.metric.get() == metric,
+                            ..Default::default()
+                        })
+                        .h(px(24.))
+                        .px(px(10.))
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(5.))
+                        .bg(move || {
+                            rgba(if s.metric.get() == metric {
+                                0x24242aff
+                            } else {
+                                0
+                            })
+                        })
+                        .hover(|s| s.bg(rgb(0x1a1a1f)))
+                        .on_press(move |_: &()| s.metric.set(metric))
+                        .child(caption(metric.label(), 10., INK).text_color(move || {
+                            rgb(if s.metric.get() == metric { INK } else { MUTED })
+                        }))
+                }),
+        )
+}
+
+fn compare_row(s: State, agent: ReadSignal<Arc<Node>>) -> impl IntoElement {
+    view()
+        .role(AccessibilityRole::Button)
+        .label(move || format!("Open {}", agent.get().name))
+        .px(px(8.))
+        .py(px(6.))
+        .rounded(px(5.))
+        .hover(|v| v.bg(rgb(0x1a1a1f)))
+        .on_press(move |_: &()| {
+            let agent = (*agent.get_untracked()).clone();
+            s.compare_open.set(false);
+            s.enter(agent);
+        })
+        .child(
+            row()
+                .gap(px(4.))
+                .child(
+                    view()
+                        .w(px(3.))
+                        .h(px(16.))
+                        .bg(move || rgb(agent_color(&agent.get().tool))),
+                )
+                .child(
+                    view()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .gap(px(1.))
+                        .child(
+                            caption(move || agent.get().name.clone(), 11., INK).number_of_lines(1),
+                        )
+                        .child(
+                            caption(move || agent.get().tool.clone(), 9., MUTED).number_of_lines(1),
+                        ),
+                )
+                .child(compare_number(move || count(agent.get().sessions), 66.))
+                .child(compare_number(move || compact(agent.get().input), 66.))
+                .child(compare_number(move || compact(agent.get().output), 66.))
+                .child(compare_number(move || compact(agent.get().cache()), 66.))
+                .child(compare_number(move || money(agent.get().cost), 66.))
+                .child(compare_number(move || count(agent.get().messages), 66.))
+                .child(compare_number(
+                    move || {
+                        if numbers_hidden() {
+                            return "•••".to_owned();
+                        }
+                        let total = s.metric.get().weight(&s.snapshot.get().root);
+                        if total <= 0. {
+                            "—".to_owned()
+                        } else {
+                            format!("{:.1}%", s.metric.get().weight(&agent.get()) / total * 100.)
+                        }
+                    },
+                    66.,
+                )),
+        )
+}
+
+fn compare_dialog(s: State) -> impl IntoElement {
+    let agents = computed(move || {
+        let metric = s.metric.get();
+        let mut agents = s.snapshot.get().root.children.clone();
+        agents.sort_by(|a, b| {
+            metric
+                .weight(b)
+                .partial_cmp(&metric.weight(a))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        agents
+    });
+    dialog()
+        .label("Compare agents")
+        .animation(nsh_core::ModalAnimation::None)
+        .close_on_escape(true)
+        .close_on_backdrop_press(false)
+        .on_cancel(move || s.compare_open.set(false))
+        .child(
+            nsh_core::element::overlay()
+                .inset_0()
+                .bg(rgba(0x000000aa))
+                .items_center()
+                .justify_center()
+                .on_press(move |_: &()| s.compare_open.set(false))
+                .child(
+                    view()
+                        .w(px(840.))
+                        .max_h(px(720.))
+                        .p(px(20.))
+                        .gap(px(12.))
+                        .rounded(px(16.))
+                        .bg(rgb(PANEL))
+                        .border_1()
+                        .border_color(rgb(LINE))
+                        .on_press(move |_: &()| {})
+                        .child(
+                            row()
+                                .justify_between()
+                                .child(
+                                    caption("Compare agents", 18., INK)
+                                        .font_weight(FontWeight::SEMIBOLD),
+                                )
+                                .child(
+                                    view()
+                                        .role(AccessibilityRole::Button)
+                                        .label("Close compare")
+                                        .w(px(28.))
+                                        .h(px(28.))
+                                        .rounded(px(6.))
+                                        .items_center()
+                                        .justify_center()
+                                        .hover(|v| v.bg(rgb(0x1f1f24)))
+                                        .on_press(move |_: &()| s.compare_open.set(false))
+                                        .child(caption("✕", 14., MUTED)),
+                                ),
+                        )
+                        .child(caption(
+                            "All agents side by side. Pick a metric, compare totals, then click a row to open that agent.",
+                            11.,
+                            MUTED,
+                        ))
+                        .child(
+                            row()
+                                .justify_between()
+                                .child(compare_metric_tabs(s))
+                                .child(caption(
+                                    move || format!("Ranked by {}", s.metric.get().label().to_lowercase()),
+                                    9.,
+                                    MUTED,
+                                )),
+                        )
+                        .child(
+                            view()
+                                .px(px(8.))
+                                .py(px(4.))
+                                .border_b_1()
+                                .border_color(rgb(LINE))
+                                .child(
+                                    row()
+                                        .gap(px(4.))
+                                        .child(caption("AGENT", 9., MUTED).flex_1())
+                                        .child(compare_head("SESSIONS", 66.))
+                                        .child(compare_head("INPUT", 66.))
+                                        .child(compare_head("OUTPUT", 66.))
+                                        .child(compare_head("CACHE", 66.))
+                                        .child(compare_head("COST", 66.))
+                                        .child(compare_head("MSGS", 66.))
+                                        .child(compare_head("SHARE", 66.)),
+                                ),
+                        )
+                        .child(
+                            scroll().max_h(px(430.)).child(
+                                view()
+                                    .gap(px(2.))
+                                    .child(each(
+                                        move || agents.get(),
+                                        |agent| agent.path.clone(),
+                                        move |agent, _| compare_row(s, agent),
+                                    ))
+                                    .child(when(move || agents.get().is_empty(), move || {
+                                        view().py(px(18.)).items_center().child(caption(
+                                            "No agents found yet.",
+                                            10.,
+                                            MUTED,
+                                        ))
+                                    })),
+                            ),
+                        )
+                        .child(
+                            view()
+                                .px(px(8.))
+                                .py(px(7.))
+                                .border_t_1()
+                                .border_color(rgb(LINE))
+                                .child(
+                                    row()
+                                        .gap(px(4.))
+                                        .child(
+                                            caption("TOTAL", 10., INK)
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .flex_1(),
+                                        )
+                                        .child(compare_number(
+                                            move || count(s.snapshot.get().root.sessions),
+                                            66.,
+                                        ))
+                                        .child(compare_number(
+                                            move || compact(s.snapshot.get().root.input),
+                                            66.,
+                                        ))
+                                        .child(compare_number(
+                                            move || compact(s.snapshot.get().root.output),
+                                            66.,
+                                        ))
+                                        .child(compare_number(
+                                            move || compact(s.snapshot.get().root.cache()),
+                                            66.,
+                                        ))
+                                        .child(compare_number(
+                                            move || money(s.snapshot.get().root.cost),
+                                            66.,
+                                        ))
+                                        .child(compare_number(
+                                            move || count(s.snapshot.get().root.messages),
+                                            66.,
+                                        ))
+                                        .child(compare_number(
+                                            move || {
+                                                if numbers_hidden() {
+                                                    "•••".to_owned()
+                                                } else if s.metric.get().weight(&s.snapshot.get().root) <= 0. {
+                                                    "—".to_owned()
+                                                } else {
+                                                    "100.0%".to_owned()
+                                                }
+                                            },
+                                            66.,
+                                        )),
+                                ),
+                        ),
+                ),
+        )
+}
+
 const SHARE_READY: &str = "Ready to copy. Nothing leaves this machine.";
 
 fn share_dialog(s: State) -> impl IntoElement {
@@ -1098,7 +1390,7 @@ fn scope_summary(s: State) -> impl IntoElement {
                 .child(stat("CACHE", move || compact(node().cache())))
                 .child(stat("SPAN", move || {
                     if numbers_hidden() {
-                        "•••".into()
+                        "•••".to_owned()
                     } else {
                         span(node().first_ts, node().last_ts)
                     }
@@ -1494,7 +1786,7 @@ fn details_page(s: State) -> impl IntoElement {
                     .child(stat("MODEL", move || {
                         let model = node().model;
                         if model.is_empty() {
-                            "—".into()
+                            "—".to_owned()
                         } else {
                             model
                         }
@@ -1518,7 +1810,7 @@ fn details_page(s: State) -> impl IntoElement {
                     .child(stat("COST", move || money(node().cost)))
                     .child(stat("LAST", move || {
                         if numbers_hidden() {
-                            "•••".into()
+                            "•••".to_owned()
                         } else {
                             stamp(node().last_ts)
                         }
