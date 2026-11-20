@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$Dir = [IO.Path]::GetFullPath($Dir)
 $Repo = "taokeqin/sessiontree"
 $App = "Sessiontree"
 $Asset = "sessiontree-windows-x86_64.zip"

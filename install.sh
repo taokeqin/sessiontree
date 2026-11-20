@@ -30,9 +30,9 @@ Options:
   -h, --help       Show this help
 
 Examples:
-  curl -fsSL https://taokeqin.github.io/sessiontree/install.sh | sh
-  curl -fsSL https://taokeqin.github.io/sessiontree/install.sh | sh -s -- --version v0.1.0
-  curl -fsSL https://taokeqin.github.io/sessiontree/install.sh | sh -s -- --dir /Applications
+  curl -fsSL https://hacken.fun/sessiontree/install.sh | sh
+  curl -fsSL https://hacken.fun/sessiontree/install.sh | sh -s -- --version v0.1.0
+  curl -fsSL https://hacken.fun/sessiontree/install.sh | sh -s -- --dir /Applications
 EOF
 }
 
@@ -70,6 +70,13 @@ if [ -n "$VERSION" ]; then
     case "$VERSION" in
         v*) ;;
         *) VERSION="v$VERSION" ;;
+    esac
+fi
+
+if [ -n "$DIR" ]; then
+    case "$DIR" in
+        /*) ;;
+        *) DIR="$(pwd)/$DIR" ;;
     esac
 fi
 

