@@ -36,7 +36,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libglib2.0-dev pkg-config clang
+          sudo apt-get install -y libgtk-4-dev libglib2.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev pkg-config clang
 
       - name: Test
         run: cargo test --all-targets
@@ -92,7 +92,7 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libglib2.0-dev pkg-config clang
+          sudo apt-get install -y libgtk-4-dev libglib2.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev pkg-config clang
       - name: Install nsh
         run: |
           curl --retry 3 -fsSL https://nsh.dev/install.sh | sh
