@@ -4,7 +4,24 @@ A native treemap explorer for the AI coding-agent sessions already on your machi
 Built with [Native Shell](https://nsh.dev) and Rust, it renders local history as a
 drill-down map: **agent → project → session**.
 
-![Sessiontree](assets/icon.png)
+![Sessiontree showing token and cost usage across masked agents, projects and sessions](assets/screenshot.png)
+
+*This window uses Sessiontree's share mode: agent, project and session names are replaced
+with `Agent N`, `Project N` and `Session N` before the screenshot is copied.*
+
+## Share without leaking your work
+
+Click **Share** in the toolbar (**⇧⌘S** on macOS, **Ctrl+Shift+S** on Windows and Linux)
+to copy the current window as a PNG. Before copying, Sessiontree can replace:
+
+- agent names
+- project names
+- session titles
+- counts, tokens, cost and dates
+
+The masked window is captured and the real data is restored immediately afterwards. The
+screenshot above was taken this way: names are masked, so it is safe to paste into a PR,
+an issue or a chat. Nothing is uploaded anywhere.
 
 ## What it reads
 
@@ -79,19 +96,6 @@ sudo apt install libgtk-4-1 libgstreamer1.0-0 libgstreamer-plugins-base1.0-0
 The toolbar field searches every agent, project, session title, model id and file path
 on the machine. Results stay in the right panel; selecting a project opens its details
 with a searchable session list.
-
-## Share screenshots
-
-The toolbar's share button (⇧⌘S / Ctrl+Shift+S) captures the window exactly as shown
-and copies it to the clipboard. Before copying, mask:
-
-- agent names
-- project names
-- session titles
-- counts, tokens, cost and dates
-
-The masked labels and numbers are swapped in for the capture and restored immediately
-afterwards. Nothing leaves the machine.
 
 ## Platforms
 
