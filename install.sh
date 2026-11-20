@@ -30,9 +30,9 @@ Options:
   -h, --help       Show this help
 
 Examples:
-  curl -fsSL https://hacken.fun/sessiontree/install.sh | sh
-  curl -fsSL https://hacken.fun/sessiontree/install.sh | sh -s -- --version v0.1.0
-  curl -fsSL https://hacken.fun/sessiontree/install.sh | sh -s -- --dir /Applications
+  curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.1.0
+  curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --dir /Applications
 EOF
 }
 
