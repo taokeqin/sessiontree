@@ -25,6 +25,55 @@ Sessiontree is passive: it only reads local stores, never proxies or uploads.
 Sessions are weighted by **tokens**, **cost** or **messages**. Costs use a built-in
 price table, including DeepSeek, GLM, MiMo, Qwen and Kimi model ids.
 
+## Install
+
+[Website](https://taokeqin.github.io/sessiontree/) · [Releases](https://github.com/taokeqin/sessiontree/releases)
+
+### macOS / Linux
+
+```sh
+curl -fsSL https://taokeqin.github.io/sessiontree/install.sh | sh
+```
+
+The installer downloads the latest release, verifies it against `SHA256SUMS.txt`, and
+installs `Sessiontree.app` into `~/Applications` (macOS) or `Sessiontree/` into
+`~/.local/share` with a `sessiontree` command and desktop entry (Linux). Run it again
+to upgrade.
+
+```sh
+# A specific release
+curl -fsSL https://taokeqin.github.io/sessiontree/install.sh | sh -s -- --version v0.1.0
+
+# Another location (the folder that holds Sessiontree.app / Sessiontree/)
+curl -fsSL https://taokeqin.github.io/sessiontree/install.sh | sh -s -- --dir /Applications
+```
+
+### Windows
+
+```powershell
+irm https://taokeqin.github.io/sessiontree/install.ps1 | iex
+```
+
+This installs to `%LOCALAPPDATA%\Sessiontree` and adds a Start menu shortcut. For a
+specific release:
+
+```powershell
+& ([scriptblock]::Create((irm https://taokeqin.github.io/sessiontree/install.ps1))) -Version v0.1.0
+```
+
+Linux needs GTK 4 and GStreamer at runtime, for example on Ubuntu:
+
+```sh
+sudo apt install libgtk-4-1 libgstreamer1.0-0 libgstreamer-plugins-base1.0-0
+```
+
+### Uninstall
+
+- macOS: delete `~/Applications/Sessiontree.app`
+- Linux: delete `~/.local/share/Sessiontree`, `~/.local/bin/sessiontree`, and the
+  `com.hacken.sessiontree` desktop/icon files under `~/.local/share`
+- Windows: delete `%LOCALAPPDATA%\Sessiontree` and the Sessiontree Start menu shortcut
+
 ## Search
 
 The toolbar field searches every agent, project, session title, model id and file path
@@ -65,8 +114,9 @@ nsh package --target linux --icon assets/icon.png
 nsh package --target windows --icon assets/icon.png
 ```
 
-Rust app packaging uses `nsh` 0.6.0. CI builds macOS, Linux and Windows and publishes
-all three archives to one GitHub release when a `v*` tag is pushed.
+Rust app packaging uses `nsh` 0.6.0. CI uploads macOS, Linux and Windows archives as
+artifacts on every `main` push; a `v*` tag publishes those archives to one GitHub
+release. The install scripts live on the GitHub Pages site and verify release checksums.
 
 ## Privacy
 
