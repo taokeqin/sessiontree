@@ -30,6 +30,14 @@ output, cache, cost, messages and each agent's share of the selected metric. Swi
 metric inside the dialog, or click a row to drill into that agent. Values are masked too
 when you share the window.
 
+## Time range and activity
+
+The range chips in the map header filter every agent, project and session by its last
+activity: **All**, **7D**, **30D**, **90D**, or a custom start and end date. The range applies
+to the treemap, totals, search, compare sheet and share image, and the choice is remembered
+between launches. The **Activity** bars in the right panel show the selected metric day by
+day over the selected period (the last 30 days for **All**).
+
 ## What it reads
 
 Sessiontree is passive: it only reads local stores, never proxies or uploads.
@@ -66,7 +74,7 @@ to upgrade.
 
 ```sh
 # A specific release
-curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.2.0
+curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.3.0
 
 # Another location (the folder that holds Sessiontree.app / Sessiontree/)
 curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --dir /Applications
@@ -82,7 +90,7 @@ This installs to `%LOCALAPPDATA%\Sessiontree` and adds a Start menu shortcut. Fo
 specific release:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.ps1))) -Version v0.2.0
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.ps1))) -Version v0.3.0
 ```
 
 Linux needs GTK 4 and GStreamer at runtime, for example on Ubuntu:

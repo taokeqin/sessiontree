@@ -169,6 +169,8 @@ jobs:
 
             ## Highlights
 
+            - Filter every agent, project and session by All, 7D, 30D, 90D or a custom date range.
+            - See daily token, cost or message activity for the selected scope and period.
             - Compare every agent side by side by sessions, input, output, cache, cost, messages
               and share of the selected metric.
             - Global search across agents, projects, session titles, models and file paths.

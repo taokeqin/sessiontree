@@ -1,6 +1,9 @@
 //! Native Rust components for the session treemap.
-use crate::{model::*, state::State};
-use nsh_base::{dialog, input, nav_page, nav_stack, tooltip};
+use crate::{
+    model::*,
+    state::{State, now_millis},
+};
+use nsh_base::{Input, dialog, input, nav_page, nav_stack, tooltip};
 use nsh_core::{
     AccessibilityRole,
     canvas::{LineCap, LineJoin},
@@ -412,6 +415,10 @@ pub fn App() -> impl IntoElement {
             move || s.compare_open.get(),
             move || compare_dialog(s),
         ))
+        .child(when(
+            move || s.custom_open.get(),
+            move || custom_range_dialog(s),
+        ))
 }
 
 fn toolbar(s: State, search_field: &ElementRef) -> impl IntoElement {
@@ -534,6 +541,90 @@ fn crumb(s: State, item: ReadSignal<(String, String)>) -> impl IntoElement {
         )
 }
 
+fn range_control(s: State) -> impl IntoElement {
+    let options = [
+        TimeRange::All,
+        TimeRange::Last7,
+        TimeRange::Last30,
+        TimeRange::Last90,
+        TimeRange::Custom { start: 0, end: 0 },
+    ];
+    row()
+        .gap(px(1.))
+        .p(px(2.))
+        .rounded(px(7.))
+        .bg(rgb(0x0b0b0d))
+        .border_1()
+        .border_color(rgb(LINE))
+        .children(options.into_iter().map(move |range| {
+            let custom = matches!(range, TimeRange::Custom { .. });
+            view()
+                .role(AccessibilityRole::Tab)
+                .label(range.title())
+                .accessibility_state(move || nsh_core::AccessibilityState {
+                    selected: if custom {
+                        matches!(s.range.get(), TimeRange::Custom { .. })
+                    } else {
+                        s.range.get() == range
+                    },
+                    ..Default::default()
+                })
+                .h(px(22.))
+                .px(px(if custom { 8. } else { 7. }))
+                .items_center()
+                .justify_center()
+                .rounded(px(5.))
+                .bg(move || {
+                    rgba(
+                        if if custom {
+                            matches!(s.range.get(), TimeRange::Custom { .. })
+                        } else {
+                            s.range.get() == range
+                        } {
+                            0x24242aff
+                        } else {
+                            0
+                        },
+                    )
+                })
+                .hover(|v| v.bg(rgb(0x1a1a1f)))
+                .on_press(move |_: &()| {
+                    if custom {
+                        s.open_custom();
+                    } else {
+                        s.set_range(range);
+                    }
+                })
+                .child(caption(range.label(), 9., INK).text_color(move || {
+                    rgb(
+                        if if custom {
+                            matches!(s.range.get(), TimeRange::Custom { .. })
+                        } else {
+                            s.range.get() == range
+                        } {
+                            INK
+                        } else {
+                            MUTED
+                        },
+                    )
+                }))
+        }))
+}
+
+fn date_input(value: Signal<String>, test_id: &'static str) -> Input {
+    input()
+        .w(px(122.))
+        .h(px(28.))
+        .test_id(test_id)
+        .value(move || value.get())
+        .placeholder("YYYY-MM-DD")
+        .placeholder_color(rgb(MUTED))
+        .text_color(rgb(INK))
+        .caret_color(rgb(GREEN))
+        .selection_color(rgba(0x65f19340))
+        .on_change(move |text: &str| value.set(text.to_owned()))
+}
+
 fn path_bar(s: State) -> impl IntoElement {
     let crumbs = computed(move || {
         let root = s.snapshot.get().root;
@@ -561,9 +652,10 @@ fn path_bar(s: State) -> impl IntoElement {
                 move |item, _| crumb(s, item),
             )),
         ))
+        .child(range_control(s))
         .child(
             view()
-                .w(px(270.))
+                .w(px(250.))
                 .h(px(28.))
                 .flex_shrink(0.)
                 .justify_center()
@@ -997,7 +1089,12 @@ fn compare_dialog(s: State) -> impl IntoElement {
                                 ),
                         )
                         .child(caption(
-                            "All agents side by side. Pick a metric, compare totals, then click a row to open that agent.",
+                            move || {
+                                format!(
+                                    "All agents side by side · {}. Pick a metric, compare totals, then click a row to open that agent.",
+                                    s.range.get().title()
+                                )
+                            },
                             11.,
                             MUTED,
                         ))
@@ -1099,6 +1196,79 @@ fn compare_dialog(s: State) -> impl IntoElement {
                                             66.,
                                         )),
                                 ),
+                        ),
+                ),
+        )
+}
+
+fn custom_range_dialog(s: State) -> impl IntoElement {
+    dialog()
+        .label("Custom date range")
+        .animation(nsh_core::ModalAnimation::None)
+        .close_on_escape(true)
+        .close_on_backdrop_press(false)
+        .on_cancel(move || s.custom_open.set(false))
+        .child(
+            nsh_core::element::overlay()
+                .inset_0()
+                .bg(rgba(0x000000aa))
+                .items_center()
+                .justify_center()
+                .on_press(move |_: &()| s.custom_open.set(false))
+                .child(
+                    view()
+                        .w(px(390.))
+                        .p(px(22.))
+                        .gap(px(14.))
+                        .rounded(px(16.))
+                        .bg(rgb(PANEL))
+                        .border_1()
+                        .border_color(rgb(LINE))
+                        .on_press(move |_: &()| {})
+                        .child(
+                            row()
+                                .justify_between()
+                                .child(
+                                    caption("Custom range", 18., INK)
+                                        .font_weight(FontWeight::SEMIBOLD),
+                                )
+                                .child(
+                                    view()
+                                        .role(AccessibilityRole::Button)
+                                        .label("Close custom range")
+                                        .w(px(28.))
+                                        .h(px(28.))
+                                        .rounded(px(6.))
+                                        .items_center()
+                                        .justify_center()
+                                        .hover(|v| v.bg(rgb(0x1f1f24)))
+                                        .on_press(move |_: &()| s.custom_open.set(false))
+                                        .child(caption("✕", 14., MUTED)),
+                                ),
+                        )
+                        .child(caption(
+                            "Sessions are included by their last activity, in local time.",
+                            11.,
+                            MUTED,
+                        ))
+                        .child(
+                            row()
+                                .gap(px(8.))
+                                .child(date_input(s.custom_start, "range-start"))
+                                .child(caption("to", 11., MUTED))
+                                .child(date_input(s.custom_end, "range-end")),
+                        )
+                        .child(
+                            caption(move || s.custom_error.get(), 10., MUTED)
+                                .text_color(rgb(AMBER))
+                                .number_of_lines(2),
+                        )
+                        .child(
+                            row()
+                                .justify_end()
+                                .gap(px(8.))
+                                .child(button("Cancel", false, move || s.custom_open.set(false)))
+                                .child(button("Apply range", false, move || s.apply_custom())),
                         ),
                 ),
         )
@@ -1416,12 +1586,72 @@ fn contents_page(s: State) -> impl IntoElement {
         ))
 }
 
+fn activity_chart(s: State) -> impl IntoElement {
+    let series = computed(move || {
+        let range = s.range.get();
+        let end = range.chart_end(now_millis());
+        daily_series(&s.current(), s.metric.get(), range.chart_days(), end)
+    });
+    let peak = computed(move || series.get().into_iter().fold(0.0_f64, f64::max));
+    let label = move || {
+        let range = s.range.get();
+        match range {
+            TimeRange::All => "LAST 30 DAYS".to_owned(),
+            TimeRange::Custom { .. } => "CUSTOM RANGE".to_owned(),
+            _ => format!("LAST {} DAYS", range.chart_days()),
+        }
+    };
+    view()
+        .gap(px(6.))
+        .py(px(10.))
+        .border_b_1()
+        .border_color(rgb(LINE))
+        .child(
+            row()
+                .justify_between()
+                .child(caption("ACTIVITY", 9., MUTED))
+                .child(caption(label, 9., MUTED)),
+        )
+        .child(
+            view()
+                .h(px(46.))
+                .flex_row()
+                .items_end()
+                .gap(px(1.))
+                .child(each(
+                    move || series.get().into_iter().enumerate().collect::<Vec<_>>(),
+                    |(index, _)| *index,
+                    move |item, _| {
+                        view()
+                            .flex_1()
+                            .min_w(px(1.))
+                            .h(move || {
+                                let value = item.get().1;
+                                let peak = peak.get();
+                                let fraction = if peak <= 0.0 {
+                                    0.04
+                                } else {
+                                    (value / peak).max(0.04) as f32
+                                };
+                                px((46.0 * fraction).max(if value > 0.0 { 2.0 } else { 1.0 }))
+                            })
+                            .rounded_t(px(2.))
+                            .bg(move || {
+                                let value = item.get().1;
+                                rgb(if value <= 0.0 { 0x2a2a31 } else { GREEN })
+                            })
+                    },
+                )),
+        )
+}
+
 fn browse_contents(s: State) -> impl IntoElement {
     scroll().flex_1().child(
         view()
             .p(px(14.))
             .gap(px(9.))
             .child(scope_summary(s))
+            .child(activity_chart(s))
             .child(
                 row()
                     .justify_between()
@@ -1990,7 +2220,8 @@ fn statusbar(s: State) -> impl IntoElement {
                         move || {
                             let root = s.snapshot.get().root;
                             format!(
-                                "{} sessions · {} messages · {} tokens · {} cache · {}",
+                                "{} · {} sessions · {} messages · {} tokens · {} cache · {}",
+                                s.range.get().title(),
                                 count(root.sessions),
                                 count(root.messages),
                                 compact(root.tokens()),

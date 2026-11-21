@@ -5,12 +5,13 @@ use crate::{
     scan,
     share::{self, ShareOptions},
 };
-use nsh_core::prelude::*;
+use nsh_core::{prelude::*, storage::Storage};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy)]
 pub(crate) struct State {
     pub owner: Owner,
+    pub raw: Signal<Snapshot>,
     pub snapshot: Signal<Snapshot>,
     pub scope: Signal<String>,
     pub selection: Signal<Node>,
@@ -34,12 +35,31 @@ pub(crate) struct State {
     pub query: Signal<String>,
     pub project_query: Signal<String>,
     pub compare_open: Signal<bool>,
+    pub range: Signal<TimeRange>,
+    pub custom_open: Signal<bool>,
+    pub custom_start: Signal<String>,
+    pub custom_end: Signal<String>,
+    pub custom_error: Signal<String>,
+}
+
+const RANGE_KEY: &str = "sessiontree.range";
+
+pub(crate) fn now_millis() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn local_date(ts: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ts)
+        .map(|time| time.with_timezone(&chrono::Local))
+        .map(|time| time.format("%Y-%m-%d").to_string())
+        .unwrap_or_default()
 }
 
 impl State {
     pub fn new() -> Self {
         Self {
             owner: Owner::current(),
+            raw: signal(Snapshot::default()),
             snapshot: signal(Snapshot::default()),
             scope: signal("root".into()),
             selection: signal(Node::default()),
@@ -63,6 +83,15 @@ impl State {
             query: signal(String::new()),
             project_query: signal(String::new()),
             compare_open: signal(false),
+            range: signal(
+                Storage::get_item(RANGE_KEY)
+                    .and_then(|value| TimeRange::from_storage(&value))
+                    .unwrap_or_default(),
+            ),
+            custom_open: signal(false),
+            custom_start: signal(String::new()),
+            custom_end: signal(String::new()),
+            custom_error: signal(String::new()),
         }
     }
 
@@ -119,7 +148,9 @@ impl State {
                                 snapshot.scanned_ms,
                                 count(snapshot.cache_hits),
                             ));
-                            self.snapshot.set(snapshot);
+                            self.raw.set(snapshot);
+                            let filtered = self.filtered();
+                            self.snapshot.set(filtered);
                             self.scope.set(root.path.clone());
                             self.selection.set(root);
                             self.hovered.set(Vec::new());
@@ -131,6 +162,64 @@ impl State {
                 });
             })
         });
+    }
+
+    fn filtered(self) -> Snapshot {
+        let raw = self.raw.get_untracked();
+        raw.filtered(self.range.get_untracked(), now_millis())
+    }
+
+    /// Changes the period and rebuilds the visible tree without rescanning.
+    pub fn set_range(self, range: TimeRange) {
+        if self.range.get_untracked() == range {
+            return;
+        }
+        self.range.set(range);
+        let _ = Storage::set_item(RANGE_KEY, range.storage_value());
+        let snapshot = self.filtered();
+        let scope = self.scope.get_untracked();
+        let selection = self.selection.get_untracked();
+        let root = snapshot.root.clone();
+        let scope_node = find(&root, &scope).cloned().unwrap_or_else(|| root.clone());
+        let selection_node = find(&root, &selection.path)
+            .cloned()
+            .unwrap_or_else(|| scope_node.clone());
+        batch(|| {
+            self.snapshot.set(snapshot);
+            self.scope.set(scope_node.path);
+            self.selection.set(selection_node);
+            self.hovered.set(Vec::new());
+        });
+    }
+
+    pub fn open_custom(self) {
+        let range = self.range.get_untracked();
+        let now = now_millis();
+        let (start, end) = match range {
+            TimeRange::Custom { start, end } => (start, end),
+            TimeRange::Last7 => (now - 6 * 86_400_000, now),
+            TimeRange::Last90 => (now - 89 * 86_400_000, now),
+            _ => (now - 29 * 86_400_000, now),
+        };
+        batch(|| {
+            self.custom_start.set(local_date(start));
+            self.custom_end.set(local_date(end));
+            self.custom_error.set(String::new());
+            self.custom_open.set(true);
+        });
+    }
+
+    pub fn apply_custom(self) {
+        match parse_custom_range(
+            &self.custom_start.get_untracked(),
+            &self.custom_end.get_untracked(),
+        ) {
+            Ok(range) => {
+                self.custom_open.set(false);
+                self.set_range(range);
+            }
+            Err(error) => self.custom_error.set(error),
+        }
     }
 
     pub fn choose(self, node: Node) {

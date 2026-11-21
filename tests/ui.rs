@@ -161,5 +161,22 @@ fn rust_ui_scans_and_drills_into_sessions() {
     ui.type_text("id:project-search", "fix").unwrap();
     ui.wait_for("text:fix the tests").unwrap();
 
+    // The time range filters the whole tree and restores it from All.
+    ui.press("label:Last 7 days").unwrap();
+    ui.wait_for("text:Last 7 days · 1 sessions · 3 messages · 2.9K tokens · 500 cache · $0.250")
+        .unwrap();
+    ui.press("label:All time").unwrap();
+    ui.wait_for("label:Open Claude Code").unwrap();
+
+    // A custom range includes the OpenCode fixture and excludes Claude.
+    ui.press("label:Custom range").unwrap();
+    ui.wait_for("text:Sessions are included by their last activity, in local time.")
+        .unwrap();
+    ui.press("label:Apply range").unwrap();
+    ui.wait_for("text:Custom range · 1 sessions · 3 messages · 2.9K tokens · 500 cache · $0.250")
+        .unwrap();
+    ui.press("label:All time").unwrap();
+    ui.wait_for("label:Open Claude Code").unwrap();
+
     drop(fixture);
 }

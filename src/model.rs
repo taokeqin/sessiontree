@@ -1,4 +1,5 @@
 //! Sessions, aggregates, and the platform-independent treemap geometry.
+use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -88,6 +89,13 @@ impl Metric {
             Self::Messages => "Tile area = messages",
         }
     }
+    pub fn amount(self, node: &Node) -> f64 {
+        match self {
+            Self::Tokens => node.tokens() as f64,
+            Self::Cost => node.cost,
+            Self::Messages => node.messages as f64,
+        }
+    }
     pub fn value(self, node: &Node) -> String {
         match self {
             Self::Tokens => compact(node.tokens()),
@@ -97,12 +105,249 @@ impl Metric {
     }
 }
 
+/// The period the treemap and its totals cover, by a session's last activity.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TimeRange {
+    #[default]
+    All,
+    Last7,
+    Last30,
+    Last90,
+    Custom {
+        start: i64,
+        end: i64,
+    },
+}
+
+impl TimeRange {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Last7 => "7D",
+            Self::Last30 => "30D",
+            Self::Last90 => "90D",
+            Self::Custom { .. } => "Custom",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::All => "All time",
+            Self::Last7 => "Last 7 days",
+            Self::Last30 => "Last 30 days",
+            Self::Last90 => "Last 90 days",
+            Self::Custom { .. } => "Custom range",
+        }
+    }
+
+    pub fn is_all(self) -> bool {
+        matches!(self, Self::All)
+    }
+
+    pub fn contains(self, last_ts: i64, now: i64) -> bool {
+        match self {
+            Self::All => true,
+            Self::Last7 => last_ts >= local_day_start(now, 6),
+            Self::Last30 => last_ts >= local_day_start(now, 29),
+            Self::Last90 => last_ts >= local_day_start(now, 89),
+            Self::Custom { start, end } => last_ts >= start && last_ts <= end,
+        }
+    }
+
+    pub fn chart_days(self) -> usize {
+        match self {
+            Self::All => 30,
+            Self::Last7 => 7,
+            Self::Last30 => 30,
+            Self::Last90 => 90,
+            Self::Custom { start, end } => {
+                (((end.saturating_sub(start)) / 86_400_000) + 1).clamp(1, 90) as usize
+            }
+        }
+    }
+
+    pub fn chart_end(self, now: i64) -> i64 {
+        match self {
+            Self::Custom { end, .. } => end,
+            _ => now,
+        }
+    }
+
+    pub fn storage_value(self) -> String {
+        match self {
+            Self::All => "all".into(),
+            Self::Last7 => "7d".into(),
+            Self::Last30 => "30d".into(),
+            Self::Last90 => "90d".into(),
+            Self::Custom { start, end } => format!("custom:{start}:{end}"),
+        }
+    }
+
+    pub fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "all" => Some(Self::All),
+            "7d" => Some(Self::Last7),
+            "30d" => Some(Self::Last30),
+            "90d" => Some(Self::Last90),
+            _ => {
+                let rest = value.strip_prefix("custom:")?;
+                let (start, end) = rest.split_once(':')?;
+                let start = start.parse().ok()?;
+                let end = end.parse().ok()?;
+                (start > 0 && end >= start).then_some(Self::Custom { start, end })
+            }
+        }
+    }
+}
+
+/// The local midnight `days_back` days before `now`.
+fn local_day_start(now: i64, days_back: i64) -> i64 {
+    let date = chrono::DateTime::from_timestamp_millis(now)
+        .map(|time| time.with_timezone(&Local).date_naive())
+        .unwrap_or_else(|| Local::now().date_naive());
+    date.checked_sub_signed(chrono::Duration::days(days_back))
+        .unwrap_or(date)
+        .and_hms_opt(0, 0, 0)
+        .and_then(|time| Local.from_local_datetime(&time).single())
+        .map(|time| time.timestamp_millis())
+        .unwrap_or(now)
+}
+
+/// Parses two local `YYYY-MM-DD` dates into an inclusive custom range.
+pub(crate) fn parse_custom_range(start: &str, end: &str) -> Result<TimeRange, String> {
+    let parse = |value: &str, label: &str| {
+        NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d")
+            .map_err(|_| format!("{label} must be YYYY-MM-DD"))
+    };
+    let first = parse(start, "Start")?;
+    let last = parse(end, "End")?;
+    let (first, last) = if first <= last {
+        (first, last)
+    } else {
+        (last, first)
+    };
+    let start = first
+        .and_hms_opt(0, 0, 0)
+        .and_then(|time| Local.from_local_datetime(&time).single())
+        .ok_or_else(|| "Start is not a valid local date".to_owned())?
+        .timestamp_millis();
+    let end = last
+        .and_hms_milli_opt(23, 59, 59, 999)
+        .and_then(|time| Local.from_local_datetime(&time).single())
+        .ok_or_else(|| "End is not a valid local date".to_owned())?
+        .timestamp_millis();
+    Ok(TimeRange::Custom { start, end })
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Snapshot {
     pub root: Node,
     pub errors: Vec<String>,
     pub scanned_ms: u64,
     pub cache_hits: u64,
+}
+
+impl Snapshot {
+    /// The same tree with sessions whose last activity is outside `range`
+    /// removed, and every parent's totals recomputed.
+    pub fn filtered(&self, range: TimeRange, now: i64) -> Snapshot {
+        if range.is_all() {
+            return self.clone();
+        }
+        let root = filter_node(&self.root, range, now).unwrap_or_else(|| Node {
+            path: "root".into(),
+            name: "All sessions".into(),
+            kind: "root".into(),
+            ..Default::default()
+        });
+        Snapshot {
+            root,
+            errors: self.errors.clone(),
+            scanned_ms: self.scanned_ms,
+            cache_hits: self.cache_hits,
+        }
+    }
+}
+
+fn filter_node(node: &Node, range: TimeRange, now: i64) -> Option<Node> {
+    if node.kind == "session" {
+        return range.contains(node.last_ts, now).then(|| node.clone());
+    }
+    let children: Vec<Arc<Node>> = node
+        .children
+        .iter()
+        .filter_map(|child| filter_node(child, range, now).map(Arc::new))
+        .collect();
+    if children.is_empty() && node.kind != "root" {
+        return None;
+    }
+    let mut parent = node.clone();
+    parent.children = children;
+    refresh_parent(&mut parent);
+    Some(parent)
+}
+
+fn refresh_parent(node: &mut Node) {
+    if node.kind == "session" {
+        return;
+    }
+    node.sessions = 0;
+    node.messages = 0;
+    node.input = 0;
+    node.output = 0;
+    node.cache_read = 0;
+    node.cache_write = 0;
+    node.cost = 0.0;
+    node.first_ts = 0;
+    node.last_ts = 0;
+    node.model.clear();
+    for child in &node.children {
+        node.sessions += child.sessions;
+        node.messages += child.messages;
+        node.input += child.input;
+        node.output += child.output;
+        node.cache_read += child.cache_read;
+        node.cache_write += child.cache_write;
+        node.cost += child.cost;
+        node.first_ts = earliest(node.first_ts, child.first_ts);
+        node.last_ts = node.last_ts.max(child.last_ts);
+        if node.model.is_empty() && !child.model.is_empty() {
+            node.model = child.model.clone();
+        }
+    }
+}
+
+/// One value per local day, oldest first, summing the sessions under `node`
+/// by their last activity. `end` is the day the last bucket covers.
+pub(crate) fn daily_series(node: &Node, metric: Metric, days: usize, end: i64) -> Vec<f64> {
+    let days = days.max(1);
+    let mut series = vec![0.0; days];
+    let end_date = chrono::DateTime::from_timestamp_millis(end)
+        .map(|time| time.with_timezone(&Local).date_naive())
+        .unwrap_or_else(|| Local::now().date_naive());
+    let start = end_date
+        .checked_sub_signed(chrono::Duration::days(days as i64 - 1))
+        .unwrap_or(end_date);
+    let start_day = start.num_days_from_ce();
+    fn walk(node: &Node, metric: Metric, start_day: i32, days: usize, series: &mut [f64]) {
+        if node.kind == "session" {
+            let Some(date) = chrono::DateTime::from_timestamp_millis(node.last_ts)
+                .map(|time| time.with_timezone(&Local).date_naive())
+            else {
+                return;
+            };
+            let index = date.num_days_from_ce() - start_day;
+            if index >= 0 && (index as usize) < days {
+                series[index as usize] += metric.amount(node);
+            }
+            return;
+        }
+        for child in &node.children {
+            walk(child, metric, start_day, days, series);
+        }
+    }
+    walk(node, metric, start_day, days, &mut series);
+    series
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -636,6 +881,88 @@ mod tests {
         assert!(bounded.iter().all(|child| child.name != "s0"));
         let tiles = mosaic(&[Arc::new(parent)], 900.0, 700.0, Metric::Tokens, 3);
         assert!(tiles.len() <= MAP_BUDGET + 1);
+    }
+
+    fn at(year: i32, month: u32, day: u32, hour: u32) -> i64 {
+        chrono::Local
+            .with_ymd_and_hms(year, month, day, hour, 0, 0)
+            .single()
+            .unwrap()
+            .timestamp_millis()
+    }
+
+    fn session(key: &str, last_ts: i64, input: u64) -> Session {
+        Session {
+            key: key.into(),
+            tool: "Claude Code".into(),
+            project: "/tmp/a".into(),
+            title: key.into(),
+            input,
+            last_ts,
+            first_ts: last_ts,
+            messages: 1,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_time_range_filters_sessions_and_rebuilds_parent_totals() {
+        let now = at(2026, 11, 21, 12);
+        let snapshot = build_tree(
+            vec![
+                session("today", now - 86_400_000, 10),
+                session("ten-days", now - 10 * 86_400_000, 20),
+                session("forty-days", now - 40 * 86_400_000, 40),
+            ],
+            Vec::new(),
+            0,
+        );
+        let week = snapshot.filtered(TimeRange::Last7, now);
+        assert_eq!(week.root.sessions, 1);
+        assert_eq!(week.root.input, 10);
+        let month = snapshot.filtered(TimeRange::Last30, now);
+        assert_eq!(month.root.sessions, 2);
+        assert_eq!(month.root.input, 30);
+        assert_eq!(month.root.children.len(), 1);
+        assert_eq!(month.root.children[0].sessions, 2);
+        assert_eq!(snapshot.filtered(TimeRange::All, now).root.sessions, 3);
+    }
+
+    #[test]
+    fn a_custom_range_is_inclusive_by_local_day() {
+        let now = at(2026, 11, 21, 12);
+        let snapshot = build_tree(
+            vec![
+                session("in", at(2026, 11, 7, 9), 10),
+                session("after", at(2026, 11, 8, 9), 20),
+            ],
+            Vec::new(),
+            0,
+        );
+        let range = parse_custom_range("2026-11-01", "2026-11-07").unwrap();
+        let filtered = snapshot.filtered(range, now);
+        assert_eq!(filtered.root.sessions, 1);
+        assert_eq!(filtered.root.input, 10);
+        assert_eq!(TimeRange::from_storage(&range.storage_value()), Some(range));
+    }
+
+    #[test]
+    fn a_daily_series_buckets_sessions_by_last_activity() {
+        let now = at(2026, 11, 21, 12);
+        let snapshot = build_tree(
+            vec![
+                session("yesterday", now - 86_400_000, 10),
+                session("two-days", now - 2 * 86_400_000, 20),
+                session("ten-days", now - 10 * 86_400_000, 40),
+            ],
+            Vec::new(),
+            0,
+        );
+        let series = daily_series(&snapshot.root, Metric::Tokens, 7, now);
+        assert_eq!(series.len(), 7);
+        assert_eq!(series[4], 20.0);
+        assert_eq!(series[5], 10.0);
+        assert_eq!(series.iter().sum::<f64>(), 30.0);
     }
 
     #[test]
