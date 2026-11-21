@@ -167,6 +167,13 @@ jobs:
             Native session explorer for AI coding agents: Claude Code, Codex, Cursor, Copilot,
             OpenCode, Pi, DeepSeek Harness, ZCode, MiMo Code, Antigravity and Kiro.
 
+            ## Highlights
+
+            - Compare every agent side by side by sessions, input, output, cache, cost, messages
+              and share of the selected metric.
+            - Global search across agents, projects, session titles, models and file paths.
+            - Redacted sharing that masks names, counts, tokens, cost and dates before copying.
+
             ## Downloads
 
             | Platform | File | Requirements |

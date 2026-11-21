@@ -23,7 +23,7 @@ Usage:
   install.sh [options]
 
 Options:
-  --version <tag>  Install a specific release, for example v0.1.0
+  --version <tag>  Install a specific release, for example v0.2.0
   --dir <path>     Install under this directory
                    macOS: the folder holding Sessiontree.app (default ~/Applications)
                    Linux: the folder holding Sessiontree/ (default ~/.local/share)
@@ -31,7 +31,7 @@ Options:
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh
-  curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.1.0
+  curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.2.0
   curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --dir /Applications
 EOF
 }

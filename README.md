@@ -66,7 +66,7 @@ to upgrade.
 
 ```sh
 # A specific release
-curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.1.0
+curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.2.0
 
 # Another location (the folder that holds Sessiontree.app / Sessiontree/)
 curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --dir /Applications
@@ -82,7 +82,7 @@ This installs to `%LOCALAPPDATA%\Sessiontree` and adds a Start menu shortcut. Fo
 specific release:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.ps1))) -Version v0.1.0
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.ps1))) -Version v0.2.0
 ```
 
 Linux needs GTK 4 and GStreamer at runtime, for example on Ubuntu:
@@ -127,7 +127,8 @@ nsh package --target windows --icon assets/icon.png
 
 Rust app packaging uses `nsh` 0.6.0. CI uploads macOS, Linux and Windows archives as
 artifacts on every `main` push; a `v*` tag publishes those archives to one GitHub
-release. The install scripts live on the GitHub Pages site and verify release checksums.
+release. The install scripts are served from `raw.githubusercontent.com` and verify release
+checksums.
 
 ## Privacy
 
