@@ -162,15 +162,18 @@ jobs:
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
-          name: Sessiontree ${{ github.ref_name }}
+          name: SessionTree ${{ github.ref_name }}
           body: |
             Native session explorer for AI coding agents: Claude Code, Codex, Cursor, Copilot,
             OpenCode, Pi, DeepSeek Harness, ZCode, MiMo Code, Antigravity and Kiro.
 
             ## Highlights
 
-            - Filter every agent, project and session by All, 7D, 30D, 90D or a custom date range.
+            - Ships in English, 简体中文 and 日本語, following the system language.
+            - Filter every agent, project and session by All, 1D, 7D, 30D, 90D or a custom date range.
             - See daily token, cost or message activity for the selected scope and period.
+            - Fold Claude Code subagent transcripts into their parent session, so totals and
+              session rows stay correct.
             - Compare every agent side by side by sessions, input, output, cache, cost, messages
               and share of the selected metric.
             - Global search across agents, projects, session titles, models and file paths.

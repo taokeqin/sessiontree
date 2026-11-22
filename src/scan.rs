@@ -255,7 +255,7 @@ pub(crate) fn report() -> Result<String, String> {
     let snapshot = scan();
     let mut out = String::new();
     out.push_str(&format!(
-        "Sessiontree static index\n  sessions:  {}\n  messages:  {}\n  tokens:    {} in / {} out / {} cache\n  cost:      {}\n  scanned:   {} ms ({} cached files)\n",
+        "SessionTree static index\n  sessions:  {}\n  messages:  {}\n  tokens:    {} in / {} out / {} cache\n  cost:      {}\n  scanned:   {} ms ({} cached files)\n",
         count(snapshot.root.sessions),
         count(snapshot.root.messages),
         compact(snapshot.root.input),
@@ -2691,20 +2691,36 @@ fn parse_kiro_ide_file(path: &Path, fallback_ts: i64) -> Result<Option<Session>,
 fn dedupe_sessions(sessions: Vec<Session>) -> Vec<Session> {
     let mut out: Vec<Session> = Vec::new();
     let mut zcode: BTreeMap<String, usize> = BTreeMap::new();
+    let mut claude: BTreeMap<(String, String), usize> = BTreeMap::new();
     for session in sessions {
+        if session.key.starts_with("claude:") {
+            // Claude Code writes one sidechain transcript per subagent, and
+            // those entries keep the parent's `sessionId`: fold them into the
+            // parent so one real session is one row, with every subagent's
+            // tokens still added to its totals. Two main files with the same
+            // id are copies, so only the richer one stays.
+            let index_key = (session.key.clone(), session.project.clone());
+            match claude.get(&index_key).copied() {
+                Some(index) => {
+                    if is_subagent(&out[index]) || is_subagent(&session) {
+                        merge_session(&mut out[index], session);
+                    } else {
+                        keep_richer(&mut out[index], session);
+                    }
+                }
+                None => {
+                    claude.insert(index_key, out.len());
+                    out.push(session);
+                }
+            }
+            continue;
+        }
         if !session.key.starts_with("zcode:") {
             out.push(session);
             continue;
         }
         match zcode.get(&session.key).copied() {
-            Some(index) => {
-                let existing = &mut out[index];
-                let score = session.input + session.output + session.messages;
-                let current = existing.input + existing.output + existing.messages;
-                if score > current || (score == current && session.cost > existing.cost) {
-                    *existing = session;
-                }
-            }
+            Some(index) => keep_richer(&mut out[index], session),
             None => {
                 zcode.insert(session.key.clone(), out.len());
                 out.push(session);
@@ -2712,6 +2728,47 @@ fn dedupe_sessions(sessions: Vec<Session>) -> Vec<Session> {
         }
     }
     out
+}
+
+/// A Claude Code sidechain transcript: a subagent's file under `subagents/`.
+fn is_subagent(session: &Session) -> bool {
+    session.file.replace('\\', "/").contains("/subagents/")
+}
+
+fn keep_richer(existing: &mut Session, candidate: Session) {
+    let score = candidate.input + candidate.output + candidate.messages;
+    let current = existing.input + existing.output + existing.messages;
+    if score > current || (score == current && candidate.cost > existing.cost) {
+        *existing = candidate;
+    }
+}
+
+/// Adds `incoming` to `existing`, keeping the metadata of whichever is the
+/// parent transcript (not a subagent's).
+fn merge_session(existing: &mut Session, incoming: Session) {
+    let input = existing.input + incoming.input;
+    let output = existing.output + incoming.output;
+    let cache_read = existing.cache_read + incoming.cache_read;
+    let cache_write = existing.cache_write + incoming.cache_write;
+    let cost = existing.cost + incoming.cost;
+    let messages = existing.messages + incoming.messages;
+    let first_ts = earliest(existing.first_ts, incoming.first_ts);
+    let last_ts = existing.last_ts.max(incoming.last_ts);
+
+    let mut merged = if is_subagent(existing) && !is_subagent(&incoming) {
+        incoming
+    } else {
+        existing.clone()
+    };
+    merged.input = input;
+    merged.output = output;
+    merged.cache_read = cache_read;
+    merged.cache_write = cache_write;
+    merged.cost = cost;
+    merged.messages = messages;
+    merged.first_ts = first_ts;
+    merged.last_ts = last_ts;
+    *existing = merged;
 }
 
 // ---------------------------------------------------------------------------
@@ -3692,6 +3749,39 @@ mod tests {
         let sessions = dedupe_sessions(vec![base, richer]);
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].messages, 4);
+    }
+
+    fn claude_session(file: &str, project: &str, messages: u64, input: u64) -> Session {
+        Session {
+            key: "claude:s1".into(),
+            tool: "Claude Code".into(),
+            project: project.into(),
+            title: file.into(),
+            messages,
+            input,
+            file: file.into(),
+            ..Session::default()
+        }
+    }
+
+    #[test]
+    fn merges_subagent_transcripts_into_the_parent_session() {
+        let parent = claude_session("/projects/p/s1.jsonl", "/p", 3, 100);
+        let subagent = claude_session("/projects/p/s1/subagents/agent-a.jsonl", "/p", 5, 200);
+        let sessions = dedupe_sessions(vec![subagent, parent]);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].file, "/projects/p/s1.jsonl");
+        assert_eq!(sessions[0].title, "/projects/p/s1.jsonl");
+        assert_eq!(sessions[0].messages, 8);
+        assert_eq!(sessions[0].input, 300);
+    }
+
+    #[test]
+    fn keeps_same_id_sessions_from_different_projects_apart() {
+        let one = claude_session("/projects/p/s1.jsonl", "/p", 3, 100);
+        let two = claude_session("/projects/q/s1.jsonl", "/q", 3, 100);
+        let sessions = dedupe_sessions(vec![one, two]);
+        assert_eq!(sessions.len(), 2);
     }
 
     #[test]

@@ -1,9 +1,10 @@
 //! Native Rust components for the session treemap.
 use crate::{
+    i18n,
     model::*,
     state::{State, now_millis},
 };
-use nsh_base::{Input, dialog, input, nav_page, nav_stack, tooltip};
+use nsh_base::{Input, MenuButtonItem, dialog, input, menu_button, nav_page, nav_stack, tooltip};
 use nsh_core::{
     AccessibilityRole,
     canvas::{LineCap, LineJoin},
@@ -33,7 +34,30 @@ fn caption(value: impl IntoReactive<SharedString>, size: f32, color: u32) -> Tex
         .text_color(rgb(color))
 }
 
-fn tip(text: &'static str) -> impl IntoTooltip {
+/// What the tree calls `node`: the synthetic root has a translated name.
+fn node_name(node: &Node) -> String {
+    if node.kind == "root" {
+        t!("root.all_sessions")
+    } else {
+        node.name.clone()
+    }
+}
+
+/// What the contents panel calls the current scope: the root is an overview.
+fn scope_title(node: &Node) -> String {
+    if node.kind == "root" {
+        t!("panel.overview")
+    } else {
+        node_name(node)
+    }
+}
+
+/// What screen readers say for "open this node".
+fn open_label(node: &Node) -> String {
+    t!("a11y.open", name = node_name(node))
+}
+
+fn tip(text: impl IntoReactive<SharedString>) -> impl IntoTooltip {
     tooltip().child(
         view()
             .px(px(8.))
@@ -48,11 +72,13 @@ fn tip(text: &'static str) -> impl IntoTooltip {
 
 fn search_input(
     value: Signal<String>,
-    placeholder: &'static str,
+    placeholder: impl IntoReactive<SharedString>,
     width: f32,
     test_id: &'static str,
     handle: Option<&ElementRef>,
 ) -> impl IntoElement {
+    let placeholder = placeholder.into_reactive();
+    let placeholder = computed(move || placeholder.get());
     view()
         .w(px(width))
         .h(px(28.))
@@ -73,7 +99,7 @@ fn search_input(
                 .child(when(
                     move || value.get().is_empty(),
                     move || {
-                        caption(placeholder, 11., MUTED)
+                        caption(move || placeholder.get(), 11., MUTED)
                             .absolute()
                             .left(px(4.))
                             .top(px(5.))
@@ -107,7 +133,7 @@ fn search_input(
             move || {
                 view()
                     .role(AccessibilityRole::Button)
-                    .label("Clear search")
+                    .label(move || t!("a11y.clear_search"))
                     .w(px(18.))
                     .h(px(18.))
                     .rounded(px(4.))
@@ -197,6 +223,9 @@ fn icon(glyph: &str) -> impl IntoElement {
         "‹" => "M15 6l-6 6 6 6",
         "↗" => "M7 17L17 7M9 7h8v8",
         "▥" => "M5 20V10M12 20V4M19 20v-7",
+        "◎" => {
+            "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M3 12h18M12 3c2.6 2.6 2.6 15 0 18M12 3c-2.6 2.6-2.6 15 0 18"
+        }
         _ => "M4 20h4L18.5 9.5a2.828 2.828 0 1 0-4-4L4 16v4M13.5 6.5l4 4",
     };
     canvas(
@@ -254,7 +283,10 @@ fn meter(fraction: impl Fn() -> f32 + 'static, height: f32, color: u32) -> impl 
         )
 }
 
-fn stat(label: &'static str, value: impl IntoReactive<SharedString>) -> impl IntoElement {
+fn stat(
+    label: impl IntoReactive<SharedString>,
+    value: impl IntoReactive<SharedString>,
+) -> impl IntoElement {
     view()
         .flex_1()
         .gap(px(4.))
@@ -278,7 +310,7 @@ fn page_header(
         .border_b_1()
         .border_color(rgb(LINE))
         .bg(rgb(PANEL))
-        .when_some(back, |v, (label, back)| {
+        .when_some(back, |v, (key, back)| {
             v.child(
                 row()
                     .gap(px(2.))
@@ -288,12 +320,12 @@ fn page_header(
                     .rounded(px(6.))
                     .hover(|s| s.bg(rgb(0x1d1d21)))
                     .role(AccessibilityRole::Button)
-                    .label(label)
+                    .label(move || t!(key))
                     .disabled(move || disabled.get())
                     .opacity(move || if disabled.get() { 0.45_f32 } else { 1.0_f32 })
                     .on_press(move |_: &()| back())
                     .child(icon("‹"))
-                    .child(caption("Back", 11., MUTED)),
+                    .child(caption(move || t!(key), 11., MUTED)),
             )
         })
         .child(
@@ -304,7 +336,7 @@ fn page_header(
         )
 }
 
-/// Sessiontree's Rust entry point, shared by `nsh dev`, `nsh run`, and Cargo.
+/// SessionTree's Rust entry point, shared by `nsh dev`, `nsh run`, and Cargo.
 #[component]
 pub fn App() -> impl IntoElement {
     {
@@ -316,6 +348,8 @@ pub fn App() -> impl IntoElement {
         attributes.title_bar = Some(title_bar);
         nsh_core::element::desktop::current_window().set(attributes);
     }
+    let initial = i18n::initial_tag();
+    effect(move || i18n::activate(&initial));
     let s = State::new();
     let search_field = element_ref();
     let keys = KeyOptions {
@@ -421,6 +455,50 @@ pub fn App() -> impl IntoElement {
         ))
 }
 
+fn language_menu(s: State) -> impl IntoElement {
+    view()
+        .tooltip(tip(move || t!("action.language_tip")))
+        .child(
+            menu_button()
+                .items(move || {
+                    let selected = s.lang.get();
+                    let mut items = vec![
+                        MenuButtonItem::new(i18n::SYSTEM, t!("language.system"))
+                            .checked(selected == i18n::SYSTEM),
+                    ];
+                    items.extend(i18n::LANGUAGES.iter().map(|(tag, name)| {
+                        MenuButtonItem::new(*tag, *name).checked(selected == *tag)
+                    }));
+                    items
+                })
+                .on_select(move |id: &SharedString| {
+                    let tag = id.to_string();
+                    i18n::choose(&tag);
+                    s.lang.set(tag);
+                })
+                .accessibility_label(t!("action.language"))
+                .w(px(38.))
+                .h(px(32.))
+                .rounded(px(6.))
+                .items_center()
+                .justify_center()
+                .hover(|v| v.bg(rgb(0x1f1f24)))
+                .active(|v| v.bg(rgb(0x2a2a30)))
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(4.))
+                        .child(icon("◎"))
+                        .child(caption(
+                            move || i18n::short_code(&i18n::resolved_tag()),
+                            10.,
+                            INK,
+                        )),
+                ),
+        )
+}
+
 fn toolbar(s: State, search_field: &ElementRef) -> impl IntoElement {
     row()
         .test_id("titlebar")
@@ -433,10 +511,10 @@ fn toolbar(s: State, search_field: &ElementRef) -> impl IntoElement {
         .bg(rgb(0x111113))
         .window_drag(true)
         .child(app_mark())
-        .child(caption("sessiontree", 17., INK).font_weight(FontWeight::SEMIBOLD))
+        .child(caption("SessionTree", 17., INK).font_weight(FontWeight::SEMIBOLD))
         .child(search_input(
             s.query,
-            "Search sessions, projects, models",
+            move || t!("search.placeholder"),
             280.,
             "global-search",
             Some(search_field),
@@ -444,40 +522,41 @@ fn toolbar(s: State, search_field: &ElementRef) -> impl IntoElement {
         .child(view().flex_1())
         .child(
             control(
-                "Share image",
+                move || t!("action.share"),
                 Some("↗"),
                 move || s.busy.get(),
                 move || s.share_open.set(true),
             )
-            .tooltip(tip("Share a screenshot (⇧⌘S)")),
+            .tooltip(tip(move || t!("action.share_tip"))),
         )
         .child(
             control(
-                "Rescan sessions",
+                move || t!("action.rescan"),
                 Some("⟳"),
                 move || s.busy.get(),
                 move || s.scan(),
             )
-            .tooltip(tip("Rescan local sessions (⌘R)")),
+            .tooltip(tip(move || t!("action.rescan_tip"))),
         )
         .child(
             control(
-                "Up one level",
+                move || t!("action.up"),
                 Some("↑"),
                 move || s.busy.get() || s.scope.get() == "root",
                 move || s.up(),
             )
-            .tooltip(tip("Up one level (⌥↑)")),
+            .tooltip(tip(move || t!("action.up_tip"))),
         )
         .child(
             control(
-                "Compare agents",
+                move || t!("action.compare"),
                 Some("▥"),
                 move || s.busy.get(),
                 move || s.compare_open.set(true),
             )
-            .tooltip(tip("Compare agent usage")),
+            .tooltip(tip(move || t!("action.compare_tip"))),
         )
+        .child(language_menu(s))
         .child(view().w(px(1.)).h(px(20.)).mx(px(4.)).bg(rgb(LINE)))
         .child(
             row()
@@ -493,7 +572,7 @@ fn toolbar(s: State, search_field: &ElementRef) -> impl IntoElement {
                         .map(move |metric| {
                             view()
                                 .role(AccessibilityRole::Tab)
-                                .label(metric.label())
+                                .label(move || metric.label())
                                 .accessibility_state(move || nsh_core::AccessibilityState {
                                     selected: s.metric.get() == metric,
                                     ..Default::default()
@@ -514,9 +593,9 @@ fn toolbar(s: State, search_field: &ElementRef) -> impl IntoElement {
                                 })
                                 .hover(|s| s.bg(rgb(0x1a1a1f)))
                                 .active(|s| s.bg(rgb(0x2a2a30)))
-                                .child(caption(metric.label(), 11., INK).text_color(move || {
-                                    rgb(if s.metric.get() == metric { INK } else { MUTED })
-                                }))
+                                .child(caption(move || metric.label(), 11., INK).text_color(
+                                    move || rgb(if s.metric.get() == metric { INK } else { MUTED }),
+                                ))
                         }),
                 ),
         )
@@ -535,7 +614,7 @@ fn crumb(s: State, item: ReadSignal<(String, String)>) -> impl IntoElement {
                 .rounded(px(4.))
                 .hover(|s| s.bg(rgb(0x18181c)))
                 .role(AccessibilityRole::Button)
-                .label(move || format!("Go to {}", item.get().1))
+                .label(move || t!("a11y.go_to", name = item.get().1))
                 .on_press(move |_: &()| s.navigate(item.get_untracked().0))
                 .child(caption(move || item.get().1, 12., GREEN).number_of_lines(1)),
         )
@@ -544,6 +623,7 @@ fn crumb(s: State, item: ReadSignal<(String, String)>) -> impl IntoElement {
 fn range_control(s: State) -> impl IntoElement {
     let options = [
         TimeRange::All,
+        TimeRange::Last1,
         TimeRange::Last7,
         TimeRange::Last30,
         TimeRange::Last90,
@@ -560,7 +640,7 @@ fn range_control(s: State) -> impl IntoElement {
             let custom = matches!(range, TimeRange::Custom { .. });
             view()
                 .role(AccessibilityRole::Tab)
-                .label(range.title())
+                .label(move || range.title())
                 .accessibility_state(move || nsh_core::AccessibilityState {
                     selected: if custom {
                         matches!(s.range.get(), TimeRange::Custom { .. })
@@ -595,7 +675,7 @@ fn range_control(s: State) -> impl IntoElement {
                         s.set_range(range);
                     }
                 })
-                .child(caption(range.label(), 9., INK).text_color(move || {
+                .child(caption(move || range.label(), 9., INK).text_color(move || {
                     rgb(
                         if if custom {
                             matches!(s.range.get(), TimeRange::Custom { .. })
@@ -632,7 +712,7 @@ fn path_bar(s: State) -> impl IntoElement {
             .into_iter()
             .map(|node| {
                 let label = if node.kind == "root" {
-                    "All sessions".to_owned()
+                    t!("root.all_sessions")
                 } else if node.kind == "project" {
                     node.title.clone()
                 } else {
@@ -666,11 +746,11 @@ fn path_bar(s: State) -> impl IntoElement {
                             if node.path.is_empty() {
                                 String::new()
                             } else {
-                                format!(
-                                    "{} sessions · {} tokens · {}",
-                                    count(node.sessions),
-                                    compact(node.tokens()),
-                                    money(node.cost)
+                                t!(
+                                    "summary.scope",
+                                    sessions = count(node.sessions),
+                                    tokens = compact(node.tokens()),
+                                    cost = money(node.cost)
                                 )
                             }
                         },
@@ -724,7 +804,7 @@ fn legend(s: State) -> impl IntoElement {
                     },
                 ))
                 .child(caption(
-                    move || format!("{} · color = agent", s.metric.get().hint()),
+                    move || t!("legend.color", hint = s.metric.get().hint()),
                     10.,
                     MUTED,
                 )),
@@ -756,16 +836,11 @@ fn treemap(s: State) -> impl IntoElement {
             s.in_map.set(false);
             s.hovered.set(Vec::new());
         })
-        .child(
-            view()
-                .w(relative(1.))
-                .h(relative(1.))
-                .child(each(
-                    move || tiles.get(),
-                    |tile| tile.node.path.clone(),
-                    move |tile, _| map_tile(s, tile),
-                )),
-        )
+        .child(view().w(relative(1.)).h(relative(1.)).child(each(
+            move || tiles.get(),
+            |tile| tile.node.path.clone(),
+            move |tile, _| map_tile(s, tile),
+        )))
         .child(when(
             move || tiles.get().is_empty(),
             move || {
@@ -775,10 +850,7 @@ fn treemap(s: State) -> impl IntoElement {
                     .items_center()
                     .justify_center()
                     .gap(px(14.))
-                    .child(when(
-                        move || s.busy.get(),
-                        move || scan_progress(s),
-                    ))
+                    .child(when(move || s.busy.get(), move || scan_progress(s)))
                     .child(when(
                         move || !s.busy.get(),
                         move || {
@@ -788,9 +860,9 @@ fn treemap(s: State) -> impl IntoElement {
                                 .child(caption(
                                     move || {
                                         if s.current().kind == "session" {
-                                            "This is a single session."
+                                            t!("empty.single_session")
                                         } else {
-                                            "No sessions here yet."
+                                            t!("empty.no_sessions")
                                         }
                                     },
                                     22.,
@@ -799,9 +871,9 @@ fn treemap(s: State) -> impl IntoElement {
                                 .child(caption(
                                     move || {
                                         if s.current().kind == "session" {
-                                            "Go back up to see the tree around it."
+                                            t!("empty.go_back")
                                         } else {
-                                            "Sessiontree reads Claude Code, Codex, Cursor, Copilot, OpenCode, Pi, DeepSeek Harness, ZCode, MiMo Code, Antigravity and Kiro history that already exists on this machine."
+                                            t!("empty.reads")
                                         }
                                     },
                                     12.,
@@ -818,7 +890,7 @@ fn scan_progress(s: State) -> impl IntoElement {
     view()
         .w(px(430.))
         .gap(px(12.))
-        .child(caption("INDEXING STATIC SESSIONS", 10., MUTED).font_weight(FontWeight::SEMIBOLD))
+        .child(caption(move || t!("scan.heading"), 10., MUTED).font_weight(FontWeight::SEMIBOLD))
         .child(caption(move || p().phase, 26., INK))
         .child(meter(
             move || {
@@ -835,16 +907,18 @@ fn scan_progress(s: State) -> impl IntoElement {
         .child(
             row()
                 .justify_between()
-                .child(stat("FILES", move || count(p().done)))
-                .child(stat("TOTAL", move || count(p().total)))
-                .child(stat("SESSIONS", move || count(p().sessions)))
-                .child(stat("ELAPSED", move || format!("{}s", s.seconds.get()))),
+                .child(stat(move || t!("scan.files"), move || count(p().done)))
+                .child(stat(move || t!("scan.total"), move || count(p().total)))
+                .child(stat(
+                    move || t!("scan.sessions"),
+                    move || count(p().sessions),
+                ))
+                .child(stat(
+                    move || t!("scan.elapsed"),
+                    move || format!("{}s", s.seconds.get()),
+                )),
         )
-        .child(caption(
-            "First launch reads every transcript. Later launches reuse the cache and only re-read changed files.",
-            10.,
-            MUTED,
-        ))
+        .child(caption(move || t!("scan.note"), 10., MUTED))
 }
 
 fn map_tile(s: State, tile: ReadSignal<Tile>) -> impl IntoElement {
@@ -926,7 +1000,7 @@ fn compare_number(value: impl IntoReactive<SharedString>, width: f32) -> impl In
         .child(caption(value, 10., MUTED))
 }
 
-fn compare_head(label: &'static str, width: f32) -> impl IntoElement {
+fn compare_head(label: impl IntoReactive<SharedString>, width: f32) -> impl IntoElement {
     view()
         .w(px(width))
         .flex_row()
@@ -948,7 +1022,7 @@ fn compare_metric_tabs(s: State) -> impl IntoElement {
                 .map(move |metric| {
                     view()
                         .role(AccessibilityRole::Tab)
-                        .label(metric.label())
+                        .label(move || metric.label())
                         .accessibility_state(move || nsh_core::AccessibilityState {
                             selected: s.metric.get() == metric,
                             ..Default::default()
@@ -967,9 +1041,11 @@ fn compare_metric_tabs(s: State) -> impl IntoElement {
                         })
                         .hover(|s| s.bg(rgb(0x1a1a1f)))
                         .on_press(move |_: &()| s.metric.set(metric))
-                        .child(caption(metric.label(), 10., INK).text_color(move || {
-                            rgb(if s.metric.get() == metric { INK } else { MUTED })
-                        }))
+                        .child(
+                            caption(move || metric.label(), 10., INK).text_color(move || {
+                                rgb(if s.metric.get() == metric { INK } else { MUTED })
+                            }),
+                        )
                 }),
         )
 }
@@ -977,7 +1053,7 @@ fn compare_metric_tabs(s: State) -> impl IntoElement {
 fn compare_row(s: State, agent: ReadSignal<Arc<Node>>) -> impl IntoElement {
     view()
         .role(AccessibilityRole::Button)
-        .label(move || format!("Open {}", agent.get().name))
+        .label(move || t!("a11y.open", name = agent.get().name))
         .px(px(8.))
         .py(px(6.))
         .rounded(px(5.))
@@ -1044,7 +1120,7 @@ fn compare_dialog(s: State) -> impl IntoElement {
         agents
     });
     dialog()
-        .label("Compare agents")
+        .label(move || t!("compare.title"))
         .animation(nsh_core::ModalAnimation::None)
         .close_on_escape(true)
         .close_on_backdrop_press(false)
@@ -1071,13 +1147,13 @@ fn compare_dialog(s: State) -> impl IntoElement {
                             row()
                                 .justify_between()
                                 .child(
-                                    caption("Compare agents", 18., INK)
+                                    caption(move || t!("compare.title"), 18., INK)
                                         .font_weight(FontWeight::SEMIBOLD),
                                 )
                                 .child(
                                     view()
                                         .role(AccessibilityRole::Button)
-                                        .label("Close compare")
+                                        .label(move || t!("compare.close"))
                                         .w(px(28.))
                                         .h(px(28.))
                                         .rounded(px(6.))
@@ -1089,25 +1165,22 @@ fn compare_dialog(s: State) -> impl IntoElement {
                                 ),
                         )
                         .child(caption(
-                            move || {
-                                format!(
-                                    "All agents side by side · {}. Pick a metric, compare totals, then click a row to open that agent.",
-                                    s.range.get().title()
-                                )
-                            },
+                            move || t!("compare.intro", range = s.range.get().title()),
                             11.,
                             MUTED,
                         ))
-                        .child(
-                            row()
-                                .justify_between()
-                                .child(compare_metric_tabs(s))
-                                .child(caption(
-                                    move || format!("Ranked by {}", s.metric.get().label().to_lowercase()),
-                                    9.,
-                                    MUTED,
-                                )),
-                        )
+                        .child(row().justify_between().child(compare_metric_tabs(s)).child(
+                            caption(
+                                move || {
+                                    t!(
+                                        "compare.ranked",
+                                        metric = s.metric.get().label().to_lowercase()
+                                    )
+                                },
+                                9.,
+                                MUTED,
+                            ),
+                        ))
                         .child(
                             view()
                                 .px(px(8.))
@@ -1117,14 +1190,17 @@ fn compare_dialog(s: State) -> impl IntoElement {
                                 .child(
                                     row()
                                         .gap(px(4.))
-                                        .child(caption("AGENT", 9., MUTED).flex_1())
-                                        .child(compare_head("SESSIONS", 66.))
-                                        .child(compare_head("INPUT", 66.))
-                                        .child(compare_head("OUTPUT", 66.))
-                                        .child(compare_head("CACHE", 66.))
-                                        .child(compare_head("COST", 66.))
-                                        .child(compare_head("MSGS", 66.))
-                                        .child(compare_head("SHARE", 66.)),
+                                        .child(
+                                            caption(move || t!("compare.agent"), 9., MUTED)
+                                                .flex_1(),
+                                        )
+                                        .child(compare_head(move || t!("compare.sessions"), 66.))
+                                        .child(compare_head(move || t!("compare.input"), 66.))
+                                        .child(compare_head(move || t!("compare.output"), 66.))
+                                        .child(compare_head(move || t!("compare.cache"), 66.))
+                                        .child(compare_head(move || t!("compare.cost"), 66.))
+                                        .child(compare_head(move || t!("compare.msgs"), 66.))
+                                        .child(compare_head(move || t!("compare.share"), 66.)),
                                 ),
                         )
                         .child(
@@ -1136,13 +1212,16 @@ fn compare_dialog(s: State) -> impl IntoElement {
                                         |agent| agent.path.clone(),
                                         move |agent, _| compare_row(s, agent),
                                     ))
-                                    .child(when(move || agents.get().is_empty(), move || {
-                                        view().py(px(18.)).items_center().child(caption(
-                                            "No agents found yet.",
-                                            10.,
-                                            MUTED,
-                                        ))
-                                    })),
+                                    .child(when(
+                                        move || agents.get().is_empty(),
+                                        move || {
+                                            view().py(px(18.)).items_center().child(caption(
+                                                move || t!("compare.empty"),
+                                                10.,
+                                                MUTED,
+                                            ))
+                                        },
+                                    )),
                             ),
                         )
                         .child(
@@ -1155,7 +1234,7 @@ fn compare_dialog(s: State) -> impl IntoElement {
                                     row()
                                         .gap(px(4.))
                                         .child(
-                                            caption("TOTAL", 10., INK)
+                                            caption(move || t!("stat.total"), 10., INK)
                                                 .font_weight(FontWeight::SEMIBOLD)
                                                 .flex_1(),
                                         )
@@ -1187,7 +1266,12 @@ fn compare_dialog(s: State) -> impl IntoElement {
                                             move || {
                                                 if numbers_hidden() {
                                                     "•••".to_owned()
-                                                } else if s.metric.get().weight(&s.snapshot.get().root) <= 0. {
+                                                } else if s
+                                                    .metric
+                                                    .get()
+                                                    .weight(&s.snapshot.get().root)
+                                                    <= 0.
+                                                {
                                                     "—".to_owned()
                                                 } else {
                                                     "100.0%".to_owned()
@@ -1203,7 +1287,7 @@ fn compare_dialog(s: State) -> impl IntoElement {
 
 fn custom_range_dialog(s: State) -> impl IntoElement {
     dialog()
-        .label("Custom date range")
+        .label(move || t!("range.custom_dialog"))
         .animation(nsh_core::ModalAnimation::None)
         .close_on_escape(true)
         .close_on_backdrop_press(false)
@@ -1229,13 +1313,13 @@ fn custom_range_dialog(s: State) -> impl IntoElement {
                             row()
                                 .justify_between()
                                 .child(
-                                    caption("Custom range", 18., INK)
+                                    caption(move || t!("range.title.custom"), 18., INK)
                                         .font_weight(FontWeight::SEMIBOLD),
                                 )
                                 .child(
                                     view()
                                         .role(AccessibilityRole::Button)
-                                        .label("Close custom range")
+                                        .label(move || t!("range.close"))
                                         .w(px(28.))
                                         .h(px(28.))
                                         .rounded(px(6.))
@@ -1246,16 +1330,12 @@ fn custom_range_dialog(s: State) -> impl IntoElement {
                                         .child(caption("✕", 14., MUTED)),
                                 ),
                         )
-                        .child(caption(
-                            "Sessions are included by their last activity, in local time.",
-                            11.,
-                            MUTED,
-                        ))
+                        .child(caption(move || t!("range.note"), 11., MUTED))
                         .child(
                             row()
                                 .gap(px(8.))
                                 .child(date_input(s.custom_start, "range-start"))
-                                .child(caption("to", 11., MUTED))
+                                .child(caption(move || t!("range.to"), 11., MUTED))
                                 .child(date_input(s.custom_end, "range-end")),
                         )
                         .child(
@@ -1267,18 +1347,24 @@ fn custom_range_dialog(s: State) -> impl IntoElement {
                             row()
                                 .justify_end()
                                 .gap(px(8.))
-                                .child(button("Cancel", false, move || s.custom_open.set(false)))
-                                .child(button("Apply range", false, move || s.apply_custom())),
+                                .child(button(
+                                    move || t!("action.cancel"),
+                                    false,
+                                    move || s.custom_open.set(false),
+                                ))
+                                .child(button(
+                                    move || t!("range.apply"),
+                                    false,
+                                    move || s.apply_custom(),
+                                )),
                         ),
                 ),
         )
 }
 
-const SHARE_READY: &str = "Ready to copy. Nothing leaves this machine.";
-
 fn share_dialog(s: State) -> impl IntoElement {
     dialog()
-        .label("Share screenshot")
+        .label(move || t!("share.title"))
         .animation(nsh_core::ModalAnimation::None)
         .close_on_escape(true)
         .close_on_backdrop_press(false)
@@ -1304,13 +1390,13 @@ fn share_dialog(s: State) -> impl IntoElement {
                             row()
                                 .justify_between()
                                 .child(
-                                    caption("Share screenshot", 18., INK)
+                                    caption(move || t!("share.title"), 18., INK)
                                         .font_weight(FontWeight::SEMIBOLD),
                                 )
                                 .child(
                                     view()
                                         .role(AccessibilityRole::Button)
-                                        .label("Close share")
+                                        .label(move || t!("share.close"))
                                         .w(px(28.))
                                         .h(px(28.))
                                         .rounded(px(6.))
@@ -1321,36 +1407,29 @@ fn share_dialog(s: State) -> impl IntoElement {
                                         .child(caption("✕", 14., MUTED)),
                                 ),
                         )
-                        .child(
-                            caption(
-                                "Copies this window as it looks now. Mask what you need first; the image is made and copied on this machine.",
-                                11.,
-                                MUTED,
-                            )
-                            .number_of_lines(3),
-                        )
+                        .child(caption(move || t!("share.intro"), 11., MUTED).number_of_lines(3))
                         .child(share_toggle(
                             s,
-                            "Agent names",
-                            "Replace agents with Agent 1, Agent 2…",
+                            move || t!("share.agent_names"),
+                            move || t!("share.agent_detail"),
                             s.share_agents,
                         ))
                         .child(share_toggle(
                             s,
-                            "Project names",
-                            "Replace projects with Project 1, Project 2…",
+                            move || t!("share.project_names"),
+                            move || t!("share.project_detail"),
                             s.share_projects,
                         ))
                         .child(share_toggle(
                             s,
-                            "Session titles",
-                            "Hide the first prompt of every session",
+                            move || t!("share.session_titles"),
+                            move || t!("share.session_detail"),
                             s.share_sessions,
                         ))
                         .child(share_toggle(
                             s,
-                            "Numbers",
-                            "Hide counts, tokens, cost and dates",
+                            move || t!("share.numbers"),
+                            move || t!("share.numbers_detail"),
                             s.share_numbers,
                         ))
                         .child(
@@ -1364,26 +1443,26 @@ fn share_dialog(s: State) -> impl IntoElement {
                             row()
                                 .justify_end()
                                 .gap(px(8.))
-                                .child(button("Cancel", false, move || {
-                                    s.share_open.set(false)
-                                }))
+                                .child(button(
+                                    move || t!("action.cancel"),
+                                    false,
+                                    move || s.share_open.set(false),
+                                ))
                                 .child(
                                     view()
                                         .role(AccessibilityRole::Button)
-                                        .label("Copy screenshot")
+                                        .label(move || t!("share.copy"))
                                         .disabled(move || s.share_busy.get())
-                                        .opacity(move || {
-                                            if s.share_busy.get() { 0.6_f32 } else { 1.0_f32 }
-                                        })
+                                        .opacity(
+                                            move || {
+                                                if s.share_busy.get() { 0.6_f32 } else { 1.0_f32 }
+                                            },
+                                        )
                                         .px(px(16.))
                                         .py(px(9.))
                                         .rounded(px(8.))
                                         .bg(move || {
-                                            rgb(if s.share_busy.get() {
-                                                0x2f6b45
-                                            } else {
-                                                GREEN
-                                            })
+                                            rgb(if s.share_busy.get() { 0x2f6b45 } else { GREEN })
                                         })
                                         .hover(|v| v.opacity(0.9))
                                         .active(|v| v.opacity(0.8))
@@ -1392,9 +1471,9 @@ fn share_dialog(s: State) -> impl IntoElement {
                                             caption(
                                                 move || {
                                                     if s.share_busy.get() {
-                                                        "Capturing…"
+                                                        t!("share.capturing")
                                                     } else {
-                                                        "Copy screenshot"
+                                                        t!("share.copy")
                                                     }
                                                 },
                                                 12.,
@@ -1410,10 +1489,12 @@ fn share_dialog(s: State) -> impl IntoElement {
 
 fn share_toggle(
     s: State,
-    label: &'static str,
-    detail: &'static str,
+    label: impl IntoReactive<SharedString>,
+    detail: impl IntoReactive<SharedString>,
     value: Signal<bool>,
 ) -> impl IntoElement {
+    let label = label.into_reactive();
+    let label = computed(move || label.get());
     let on = move || value.get();
     view()
         .role(AccessibilityRole::Checkbox)
@@ -1437,7 +1518,7 @@ fn share_toggle(
         .hover(|v| v.bg(rgb(0x1a1a1f)))
         .on_press(move |_: &()| {
             value.set(!value.get_untracked());
-            s.share_status.set(SHARE_READY.into());
+            s.share_status.set(t!("share.ready"));
         })
         .child(
             view()
@@ -1483,8 +1564,8 @@ fn sidebar(s: State) -> impl IntoElement {
                 .child(
                     nav_page()
                         .key("contents")
-                        .title(move || s.current().name)
-                        .header(page_header(move || s.current().name, None, false))
+                        .title(move || scope_title(&s.current()))
+                        .header(page_header(move || scope_title(&s.current()), None, false))
                         .child(contents_page(s)),
                 )
                 .child(when(
@@ -1492,11 +1573,11 @@ fn sidebar(s: State) -> impl IntoElement {
                     move || {
                         nav_page()
                             .key("details")
-                            .title(move || s.selection.get().name)
+                            .title(move || node_name(&s.selection.get()))
                             .on_dismiss(back)
                             .header(page_header(
-                                move || s.selection.get().name,
-                                Some(("Back to contents", Box::new(back))),
+                                move || node_name(&s.selection.get()),
+                                Some(("nav.back_to_contents", Box::new(back))),
                                 false,
                             ))
                             .child(details_page(s))
@@ -1521,7 +1602,9 @@ fn scope_summary(s: State) -> impl IntoElement {
                     if node.kind == "project" && !node.title.is_empty() {
                         node.title
                     } else if node.kind == "root" {
-                        "Every agent, project and session found on this machine.".into()
+                        t!("summary.all_scope")
+                    } else if node.kind == "agent" {
+                        t!("summary.agent_scope")
                     } else {
                         node.name
                     }
@@ -1543,34 +1626,43 @@ fn scope_summary(s: State) -> impl IntoElement {
         .child(
             row()
                 .gap(px(12.))
-                .child(stat("SESSIONS", move || count(node().sessions)))
-                .child(stat("MESSAGES", move || count(node().messages))),
+                .child(stat(
+                    move || t!("stat.sessions"),
+                    move || count(node().sessions),
+                ))
+                .child(stat(
+                    move || t!("stat.messages"),
+                    move || count(node().messages),
+                )),
         )
         .child(
             row()
                 .gap(px(12.))
-                .child(stat("IN / OUT", move || {
-                    format!("{} / {}", compact(node().input), compact(node().output))
-                }))
-                .child(stat("COST", move || money(node().cost))),
+                .child(stat(
+                    move || t!("stat.in_out"),
+                    move || format!("{} / {}", compact(node().input), compact(node().output)),
+                ))
+                .child(stat(move || t!("stat.cost"), move || money(node().cost))),
         )
         .child(
             row()
                 .gap(px(12.))
-                .child(stat("CACHE", move || compact(node().cache())))
-                .child(stat("SPAN", move || {
-                    if numbers_hidden() {
-                        "•••".to_owned()
-                    } else {
-                        span(node().first_ts, node().last_ts)
-                    }
-                })),
+                .child(stat(
+                    move || t!("stat.cache"),
+                    move || compact(node().cache()),
+                ))
+                .child(stat(
+                    move || t!("stat.span"),
+                    move || {
+                        if numbers_hidden() {
+                            "•••".to_owned()
+                        } else {
+                            span(node().first_ts, node().last_ts)
+                        }
+                    },
+                )),
         )
-        .child(caption(
-            "Click a tile to select · click again to open · right side drills down",
-            9.,
-            MUTED,
-        ))
+        .child(caption(move || t!("summary.map_hint"), 9., MUTED))
 }
 
 fn contents_page(s: State) -> impl IntoElement {
@@ -1596,9 +1688,10 @@ fn activity_chart(s: State) -> impl IntoElement {
     let label = move || {
         let range = s.range.get();
         match range {
-            TimeRange::All => "LAST 30 DAYS".to_owned(),
-            TimeRange::Custom { .. } => "CUSTOM RANGE".to_owned(),
-            _ => format!("LAST {} DAYS", range.chart_days()),
+            TimeRange::All => t!("activity.last_30"),
+            TimeRange::Custom { .. } => t!("activity.custom"),
+            _ if range.chart_days() == 1 => t!("activity.last_day"),
+            _ => t!("activity.last_days", days = range.chart_days()),
         }
     };
     view()
@@ -1609,7 +1702,7 @@ fn activity_chart(s: State) -> impl IntoElement {
         .child(
             row()
                 .justify_between()
-                .child(caption("ACTIVITY", 9., MUTED))
+                .child(caption(move || t!("activity.heading"), 9., MUTED))
                 .child(caption(label, 9., MUTED)),
         )
         .child(
@@ -1659,9 +1752,9 @@ fn browse_contents(s: State) -> impl IntoElement {
                         move || {
                             let node = s.current();
                             match node.kind.as_str() {
-                                "root" => "AGENTS".to_owned(),
-                                "agent" => "PROJECTS".to_owned(),
-                                _ => "SESSIONS".to_owned(),
+                                "root" => t!("heading.agents"),
+                                "agent" => t!("heading.projects"),
+                                _ => t!("heading.sessions"),
                             }
                         },
                         10.,
@@ -1671,7 +1764,11 @@ fn browse_contents(s: State) -> impl IntoElement {
                         move || {
                             let total = s.current().children.len();
                             if total > MAP_BUDGET {
-                                format!("top {} of {}", MAP_BUDGET, count(total as u64))
+                                t!(
+                                    "list.top_of",
+                                    shown = MAP_BUDGET,
+                                    total = count(total as u64)
+                                )
                             } else {
                                 count(total as u64)
                             }
@@ -1691,9 +1788,9 @@ fn browse_contents(s: State) -> impl IntoElement {
                     view().py(px(18.)).items_center().gap(px(5.)).child(caption(
                         move || {
                             if s.busy.get() {
-                                "Scanning…".to_owned()
+                                t!("empty.scanning")
                             } else {
-                                "Nothing below this node.".to_owned()
+                                t!("empty.nothing_below")
                             }
                         },
                         11.,
@@ -1771,9 +1868,9 @@ fn search_contents(s: State) -> impl IntoElement {
             .child(
                 row()
                     .justify_between()
-                    .child(caption("SEARCH", 10., MUTED))
+                    .child(caption(move || t!("search.heading"), 10., MUTED))
                     .child(caption(
-                        move || format!("{} results", hits.get().len()),
+                        move || t!("search.results", count = hits.get().len()),
                         10.,
                         MUTED,
                     )),
@@ -1787,7 +1884,7 @@ fn search_contents(s: State) -> impl IntoElement {
                 move || hits.get().is_empty(),
                 move || {
                     view().py(px(18.)).items_center().child(caption(
-                        "No matching agents, projects or sessions.",
+                        move || t!("search.empty"),
                         11.,
                         MUTED,
                     ))
@@ -1804,7 +1901,7 @@ fn search_row(s: State, node: ReadSignal<Arc<Node>>) -> impl IntoElement {
         .rounded(px(4.))
         .hover(|s| s.bg(rgb(0x1a1a1e)))
         .role(AccessibilityRole::Button)
-        .label(move || format!("Open {}", node.get().name))
+        .label(move || open_label(&node.get()))
         .on_press(move |_: &()| {
             let node = (*node.get_untracked()).clone();
             s.query.set(String::new());
@@ -1842,11 +1939,15 @@ fn search_row(s: State, node: ReadSignal<Arc<Node>>) -> impl IntoElement {
                                             format!("{} · {}", node.tool, node.model)
                                         }
                                     } else if node.kind == "project" {
-                                        format!("{} · {} sessions", node.tool, count(node.sessions))
+                                        t!(
+                                            "row.project_meta",
+                                            tool = node.tool,
+                                            count = count(node.sessions)
+                                        )
                                     } else {
-                                        format!(
-                                            "Agent · {} projects",
-                                            count(node.children.len() as u64)
+                                        t!(
+                                            "row.agent_meta",
+                                            count = count(node.children.len() as u64)
                                         )
                                     }
                                 },
@@ -1881,7 +1982,7 @@ fn child_row(s: State, node: ReadSignal<Arc<Node>>) -> impl IntoElement {
         })
         .hover(|s| s.bg(rgb(0x1a1a1e)))
         .role(AccessibilityRole::Button)
-        .label(move || format!("Open {}", node.get().name))
+        .label(move || open_label(&node.get()))
         .on_press(move |_: &()| {
             let node = (*node.get_untracked()).clone();
             if node.kind == "session" {
@@ -1928,9 +2029,12 @@ fn child_row(s: State, node: ReadSignal<Arc<Node>>) -> impl IntoElement {
                                             node.model.clone()
                                         }
                                     } else if node.kind == "agent" {
-                                        format!("{} projects", count(node.children.len() as u64))
+                                        t!(
+                                            "row.agent_meta_short",
+                                            count = count(node.children.len() as u64)
+                                        )
                                     } else {
-                                        format!("{} sessions", count(node.sessions))
+                                        t!("row.project_meta_short", count = count(node.sessions))
                                     }
                                 },
                                 9.,
@@ -1971,7 +2075,7 @@ fn details_page(s: State) -> impl IntoElement {
                             .bg(move || rgb(tile_color(&node(), 1))),
                     )
                     .child(
-                        caption(move || node().name, 20., INK)
+                        caption(move || node_name(&node()), 20., INK)
                             .font_weight(FontWeight::SEMIBOLD)
                             .flex_1()
                             .number_of_lines(3),
@@ -1987,9 +2091,9 @@ fn details_page(s: State) -> impl IntoElement {
                             node.title.clone()
                         }
                     } else if node.kind == "agent" {
-                        format!("Agent · {} projects", count(node.children.len() as u64))
+                        t!("row.agent_meta", count = count(node.children.len() as u64))
                     } else {
-                        format!("Project · {}", node.title)
+                        t!("row.project_title", title = node.title)
                     }
                 },
                 11.,
@@ -2006,45 +2110,69 @@ fn details_page(s: State) -> impl IntoElement {
             .child(
                 row()
                     .gap(px(14.))
-                    .child(stat("AGENT", move || node().tool))
-                    .child(stat("SESSIONS", move || count(node().sessions))),
+                    .child(stat(move || t!("stat.agent"), move || node().tool))
+                    .child(stat(
+                        move || t!("stat.sessions"),
+                        move || count(node().sessions),
+                    )),
             )
             .child(
                 row()
                     .gap(px(14.))
-                    .child(stat("MESSAGES", move || count(node().messages)))
-                    .child(stat("MODEL", move || {
-                        let model = node().model;
-                        if model.is_empty() {
-                            "—".to_owned()
-                        } else {
-                            model
-                        }
-                    })),
+                    .child(stat(
+                        move || t!("stat.messages"),
+                        move || count(node().messages),
+                    ))
+                    .child(stat(
+                        move || t!("stat.model"),
+                        move || {
+                            let model = node().model;
+                            if model.is_empty() {
+                                "—".to_owned()
+                            } else {
+                                model
+                            }
+                        },
+                    )),
             )
             .child(
                 row()
                     .gap(px(14.))
-                    .child(stat("INPUT", move || compact(node().input)))
-                    .child(stat("OUTPUT", move || compact(node().output))),
+                    .child(stat(
+                        move || t!("stat.input"),
+                        move || compact(node().input),
+                    ))
+                    .child(stat(
+                        move || t!("stat.output"),
+                        move || compact(node().output),
+                    )),
             )
             .child(
                 row()
                     .gap(px(14.))
-                    .child(stat("CACHE READ", move || compact(node().cache_read)))
-                    .child(stat("CACHE WRITE", move || compact(node().cache_write))),
+                    .child(stat(
+                        move || t!("stat.cache_read"),
+                        move || compact(node().cache_read),
+                    ))
+                    .child(stat(
+                        move || t!("stat.cache_write"),
+                        move || compact(node().cache_write),
+                    )),
             )
             .child(
                 row()
                     .gap(px(14.))
-                    .child(stat("COST", move || money(node().cost)))
-                    .child(stat("LAST", move || {
-                        if numbers_hidden() {
-                            "•••".to_owned()
-                        } else {
-                            stamp(node().last_ts)
-                        }
-                    })),
+                    .child(stat(move || t!("stat.cost"), move || money(node().cost)))
+                    .child(stat(
+                        move || t!("stat.last"),
+                        move || {
+                            if numbers_hidden() {
+                                "•••".to_owned()
+                            } else {
+                                stamp(node().last_ts)
+                            }
+                        },
+                    )),
             )
             .child(when(
                 move || node().kind == "project",
@@ -2055,7 +2183,7 @@ fn details_page(s: State) -> impl IntoElement {
                 move || node().kind != "session",
                 move || {
                     row().gap(px(6.)).child(button(
-                        "Open",
+                        move || t!("action.open"),
                         move || s.busy.get(),
                         move || s.enter(s.selection.get_untracked()),
                     ))
@@ -2099,12 +2227,16 @@ fn project_sessions(s: State) -> impl IntoElement {
         .child(
             row()
                 .justify_between()
-                .child(caption("SESSIONS", 10., MUTED))
+                .child(caption(move || t!("heading.sessions"), 10., MUTED))
                 .child(caption(
                     move || {
                         let (list, total) = sessions.get();
                         if total > list.len() {
-                            format!("{} of {}", list.len(), count(total as u64))
+                            t!(
+                                "list.top_of",
+                                shown = list.len(),
+                                total = count(total as u64)
+                            )
                         } else {
                             count(total as u64)
                         }
@@ -2115,7 +2247,7 @@ fn project_sessions(s: State) -> impl IntoElement {
         )
         .child(search_input(
             s.project_query,
-            "Search this project",
+            move || t!("search.project_placeholder"),
             240.,
             "project-search",
             None,
@@ -2129,7 +2261,7 @@ fn project_sessions(s: State) -> impl IntoElement {
             move || sessions.get().0.is_empty(),
             move || {
                 view().py(px(14.)).items_center().child(caption(
-                    "No sessions match this search.",
+                    move || t!("search.project_empty"),
                     10.,
                     MUTED,
                 ))
@@ -2153,7 +2285,7 @@ fn sources_footer(s: State) -> impl IntoElement {
         .border_t_1()
         .border_color(rgb(LINE))
         .bg(rgb(0x141416))
-        .child(caption("SOURCES", 9., MUTED))
+        .child(caption(move || t!("sources.heading"), 9., MUTED))
         .child(each(
             move || agents.get(),
             |agent| agent.0.clone(),
@@ -2194,13 +2326,13 @@ fn statusbar(s: State) -> impl IntoElement {
                 caption(
                     move || {
                         let p = s.progress.get().unwrap_or_default();
-                        format!(
-                            "{} · {} / {} files · {} sessions · {}s",
-                            p.phase,
-                            count(p.done),
-                            count(p.total),
-                            count(p.sessions),
-                            s.seconds.get()
+                        t!(
+                            "status.scanning",
+                            phase = p.phase,
+                            done = count(p.done),
+                            total = count(p.total),
+                            sessions = count(p.sessions),
+                            seconds = s.seconds.get()
                         )
                     },
                     10.,
@@ -2219,14 +2351,14 @@ fn statusbar(s: State) -> impl IntoElement {
                     .child(caption(
                         move || {
                             let root = s.snapshot.get().root;
-                            format!(
-                                "{} · {} sessions · {} messages · {} tokens · {} cache · {}",
-                                s.range.get().title(),
-                                count(root.sessions),
-                                count(root.messages),
-                                compact(root.tokens()),
-                                compact(root.cache()),
-                                money(root.cost)
+                            t!(
+                                "status.summary",
+                                range = s.range.get().title(),
+                                sessions = count(root.sessions),
+                                messages = count(root.messages),
+                                tokens = compact(root.tokens()),
+                                cache = compact(root.cache()),
+                                cost = money(root.cost)
                             )
                         },
                         10.,
@@ -2241,15 +2373,17 @@ fn statusbar(s: State) -> impl IntoElement {
         ))
         .child(
             caption(
-                if cfg!(target_os = "macos") {
-                    "⌘F Search   ⌘R Rescan   ⇧⌘S Share   ⌥↑ Parent   ↑↓ Select   Enter Open   Esc Back"
-                } else {
-                    "Ctrl+F Search   Ctrl+R Rescan   Ctrl+Shift+S Share   Alt+↑ Parent   ↑↓ Select   Enter Open   Esc Back"
+                move || {
+                    if cfg!(target_os = "macos") {
+                        t!("status.shortcuts_mac")
+                    } else {
+                        t!("status.shortcuts_other")
+                    }
                 },
                 10.,
                 MUTED,
             )
             .number_of_lines(1),
         )
-        .child(caption("color = agent · area = metric", 10., AMBER).number_of_lines(1))
+        .child(caption(move || t!("status.legend"), 10., AMBER).number_of_lines(1))
 }

@@ -1,6 +1,6 @@
 //! Application state. Reading transcripts never runs on the UI thread.
 use crate::{
-    capture,
+    capture, i18n,
     model::*,
     scan,
     share::{self, ShareOptions},
@@ -34,6 +34,7 @@ pub(crate) struct State {
     pub map_frame: Signal<(f32, f32)>,
     pub query: Signal<String>,
     pub project_query: Signal<String>,
+    pub lang: Signal<String>,
     pub compare_open: Signal<bool>,
     pub range: Signal<TimeRange>,
     pub custom_open: Signal<bool>,
@@ -66,7 +67,7 @@ impl State {
             metric: signal(Metric::Tokens),
             levels: signal(3),
             busy: signal(false),
-            message: signal("Looking for local agent sessions…".into()),
+            message: signal(t!("state.looking")),
             progress: signal(None),
             hovered: signal(Vec::new()),
             in_map: signal(false),
@@ -78,10 +79,11 @@ impl State {
             share_sessions: signal(false),
             share_numbers: signal(false),
             share_busy: signal(false),
-            share_status: signal("Captures this window. Nothing leaves this machine.".into()),
+            share_status: signal(t!("state.share_status")),
             map_frame: signal((700.0, 520.0)),
             query: signal(String::new()),
             project_query: signal(String::new()),
+            lang: signal(i18n::initial_tag()),
             compare_open: signal(false),
             range: signal(
                 Storage::get_item(RANGE_KEY)
@@ -112,8 +114,7 @@ impl State {
             self.generation.set(run);
             self.busy.set(true);
             self.seconds.set(0);
-            self.message
-                .set("Indexing Claude Code and OpenCode history…".into());
+            self.message.set(t!("state.indexing"));
             self.progress.set(Some(Progress::default()));
         });
         self.owner.run(move || {
@@ -143,10 +144,10 @@ impl State {
                     match result {
                         Ok(snapshot) => {
                             let root = snapshot.root.clone();
-                            self.message.set(format!(
-                                "Updated in {} ms · {} cached files",
-                                snapshot.scanned_ms,
-                                count(snapshot.cache_hits),
+                            self.message.set(t!(
+                                "state.updated",
+                                ms = snapshot.scanned_ms,
+                                files = count(snapshot.cache_hits),
                             ));
                             self.raw.set(snapshot);
                             let filtered = self.filtered();
@@ -309,8 +310,8 @@ impl State {
         let original = snapshot;
         batch(|| {
             self.share_busy.set(true);
-            self.share_status.set("Capturing the window…".into());
-            self.message.set("Updated just now".into());
+            self.share_status.set(t!("state.capturing"));
+            self.message.set(t!("state.updated_just_now"));
             self.share_open.set(false);
             if masked {
                 self.snapshot.set(redacted_snapshot);
@@ -368,21 +369,16 @@ impl State {
                                 format!("{} KB", (bytes.len() / 1024).max(1))
                             };
                             if captured_window {
-                                self.message
-                                    .set(format!("Copied a {size} screenshot to the clipboard."));
+                                self.message.set(t!("state.copied", size = size));
                             } else {
-                                self.message.set(format!(
-                                    "Copied a {size} share image (window capture is unavailable here)."
-                                ));
+                                self.message.set(t!("state.copied_fallback", size = size));
                             }
                         }
                         None => {
-                            self.message
-                                .set(format!("Could not capture the window: {error}"));
+                            self.message.set(t!("state.capture_failed", error = error));
                         }
                     }
-                    self.share_status
-                        .set("Ready to copy. Nothing leaves this machine.".into());
+                    self.share_status.set(t!("share.ready"));
                     self.share_busy.set(false);
                 });
             })

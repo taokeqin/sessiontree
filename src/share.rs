@@ -9,6 +9,7 @@ use nsh_core::{
     element::Painter,
     geometry::{Bounds, point, px, size},
     prelude::*,
+    t,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -65,7 +66,7 @@ fn labels(root: &Node) -> Labels {
     labels
 }
 
-fn node_label(node: &Node, options: ShareOptions, labels: &Labels) -> String {
+fn node_label(node: &Node, options: ShareOptions, labels: &Labels, root_label: &str) -> String {
     match node.kind.as_str() {
         "agent" if options.mask_agents => labels
             .agents
@@ -82,7 +83,7 @@ fn node_label(node: &Node, options: ShareOptions, labels: &Labels) -> String {
             .get(&node.path)
             .cloned()
             .unwrap_or_else(|| "Session".into()),
-        _ if node.kind == "root" => "All sessions".into(),
+        _ if node.kind == "root" => root_label.to_owned(),
         _ => node.name.clone(),
     }
 }
@@ -208,6 +209,7 @@ pub(crate) fn painter(
     frame: (f32, f32),
 ) -> (Painter, f32) {
     let labels = labels(root);
+    let root_label = t!("root.all_sessions");
     let mut p = Painter::new()
         .fill_color(rgb(BG))
         .fill_rect(0.0, 0.0, WIDTH, 10_000.0)
@@ -215,7 +217,7 @@ pub(crate) fn painter(
         .fill_rect(0.0, 0.0, WIDTH, 3.0);
 
     p = draw_mark(p, 52.0, 42.0, 1.5);
-    p = text(p, "sessiontree", 98.0, 46.0, style(22.0, 600, INK));
+    p = text(p, "SessionTree", 98.0, 46.0, style(22.0, 600, INK));
     p = text(
         p,
         "sessiontree.app",
@@ -227,7 +229,7 @@ pub(crate) fn painter(
         .fill_color(rgb(LINE))
         .fill_rect(52.0, 92.0, WIDTH - 104.0, 1.0);
 
-    let title = node_label(node, options, &labels);
+    let title = node_label(node, options, &labels, &root_label);
     p = text(
         p,
         &fit(&title, WIDTH - 104.0, 30.0),
@@ -236,18 +238,16 @@ pub(crate) fn painter(
         style(30.0, 600, INK),
     );
 
+    let metric_label = metric.label().to_lowercase();
     let summary = if options.mask_numbers {
-        format!(
-            "Session activity  ·  area = {}",
-            metric.label().to_lowercase()
-        )
+        t!("share.summary_masked", metric = metric_label)
     } else {
-        format!(
-            "{} sessions  ·  {} tokens  ·  {}  ·  area = {}",
-            count(node.sessions),
-            compact(node.tokens()),
-            money(node.cost),
-            metric.label().to_lowercase()
+        t!(
+            "share.summary",
+            sessions = count(node.sessions),
+            tokens = compact(node.tokens()),
+            cost = money(node.cost),
+            metric = metric_label
         )
     };
     p = text(p, &summary, 52.0, 156.0, style(12.0, 400, MUTED));
@@ -287,7 +287,7 @@ pub(crate) fn painter(
     if tiles.is_empty() {
         p = text(
             p,
-            "No sessions to share yet.",
+            &t!("share.empty"),
             frame.0 / 2.0,
             frame.1 / 2.0 - 8.0,
             TextStyle {
@@ -313,7 +313,7 @@ pub(crate) fn painter(
             Some(rgba((color << 8) | 97)),
         );
         if width > 70.0 && height > 26.0 {
-            let label = node_label(&tile.node, options, &labels);
+            let label = node_label(&tile.node, options, &labels, &root_label);
             p = text(
                 p,
                 &fit(&label, width - 10.0, 11.0),
@@ -339,13 +339,17 @@ pub(crate) fn painter(
     let mut footer_y = map_y + map_h + 42.0;
     if !entries.is_empty() {
         let heading = match node.kind.as_str() {
-            "root" => "AGENTS",
-            "agent" => "PROJECTS",
-            _ => "SESSIONS",
+            "root" => t!("heading.agents"),
+            "agent" => t!("heading.projects"),
+            _ => t!("heading.sessions"),
         };
         p = text(
             p,
-            &format!("{heading}  ·  BY {}", metric.label().to_uppercase()),
+            &t!(
+                "share.legend_heading",
+                heading = heading,
+                metric = metric.label().to_uppercase()
+            ),
             52.0,
             legend_top,
             style(9.0, 600, MUTED),
@@ -364,7 +368,11 @@ pub(crate) fn painter(
             );
             p = text(
                 p,
-                &fit(&node_label(child, options, &labels), 400.0, 11.0),
+                &fit(
+                    &node_label(child, options, &labels, &root_label),
+                    400.0,
+                    11.0,
+                ),
                 x + 16.0,
                 y + 2.0,
                 style(11.0, 400, INK),
@@ -384,14 +392,14 @@ pub(crate) fn painter(
         .fill_rect(52.0, footer_y, WIDTH - 104.0, 1.0);
     p = text(
         p,
-        "Local-first session history  ·  nothing leaves this machine",
+        &t!("share.footer"),
         52.0,
         footer_y + 14.0,
         style(10.0, 400, MUTED),
     );
     p = text(
         p,
-        "generated with sessiontree",
+        &t!("share.generated"),
         WIDTH - 52.0,
         footer_y + 14.0,
         style_right(10.0, 400, MUTED),
@@ -585,26 +593,39 @@ mod tests {
             ..Node::default()
         };
         let labels = labels(&root);
+        let root_label = "All sessions";
         let masked = ShareOptions {
             mask_agents: true,
             mask_projects: true,
             mask_sessions: true,
             mask_numbers: true,
         };
-        assert_eq!(node_label(&root, masked, &labels), "All sessions");
+        assert_eq!(
+            node_label(&root, masked, &labels, root_label),
+            "All sessions"
+        );
         let agent = &root.children[0];
         let project = &agent.children[0];
         let session = &project.children[0];
-        assert_eq!(node_label(agent, masked, &labels), "Agent 1");
-        assert_eq!(node_label(project, masked, &labels), "Project 1");
-        assert_eq!(node_label(session, masked, &labels), "Session 1");
+        assert_eq!(node_label(agent, masked, &labels, root_label), "Agent 1");
         assert_eq!(
-            node_label(agent, ShareOptions::default(), &labels),
+            node_label(project, masked, &labels, root_label),
+            "Project 1"
+        );
+        assert_eq!(
+            node_label(session, masked, &labels, root_label),
+            "Session 1"
+        );
+        assert_eq!(
+            node_label(agent, ShareOptions::default(), &labels, root_label),
             "Claude Code"
         );
-        assert_eq!(node_label(project, ShareOptions::default(), &labels), "x");
         assert_eq!(
-            node_label(session, ShareOptions::default(), &labels),
+            node_label(project, ShareOptions::default(), &labels, root_label),
+            "x"
+        );
+        assert_eq!(
+            node_label(session, ShareOptions::default(), &labels, root_label),
             "Fix the login"
         );
     }

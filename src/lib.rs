@@ -1,11 +1,13 @@
 //! Native explorer for the AI coding sessions already kept on this machine.
 mod capture;
+mod i18n;
 mod model;
 mod scan;
 mod share;
 mod state;
 mod ui;
 
+pub use i18n::translations;
 use nsh_core::prelude::*;
 pub use ui::App;
 

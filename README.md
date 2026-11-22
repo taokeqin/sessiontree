@@ -1,18 +1,18 @@
-# Sessiontree
+# SessionTree
 
 A native treemap explorer for the AI coding-agent sessions already on your machine.
 Built with [Native Shell](https://nsh.dev) and Rust, it renders local history as a
 drill-down map: **agent → project → session**.
 
-![Sessiontree showing token and cost usage across masked agents, projects and sessions](assets/screenshot.png)
+![SessionTree showing token and cost usage across masked agents, projects and sessions](assets/screenshot.png)
 
-*This window uses Sessiontree's share mode: agent, project and session names are replaced
+*This window uses SessionTree's share mode: agent, project and session names are replaced
 with `Agent N`, `Project N` and `Session N` before the screenshot is copied.*
 
 ## Share without leaking your work
 
 Click **Share** in the toolbar (**⇧⌘S** on macOS, **Ctrl+Shift+S** on Windows and Linux)
-to copy the current window as a PNG. Before copying, Sessiontree can replace:
+to copy the current window as a PNG. Before copying, SessionTree can replace:
 
 - agent names
 - project names
@@ -40,7 +40,7 @@ day over the selected period (the last 30 days for **All**).
 
 ## What it reads
 
-Sessiontree is passive: it only reads local stores, never proxies or uploads.
+SessionTree is passive: it only reads local stores, never proxies or uploads.
 
 - Claude Code
 - Codex
@@ -74,7 +74,7 @@ to upgrade.
 
 ```sh
 # A specific release
-curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.3.0
+curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.4.0
 
 # Another location (the folder that holds Sessiontree.app / Sessiontree/)
 curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --dir /Applications
@@ -90,7 +90,7 @@ This installs to `%LOCALAPPDATA%\Sessiontree` and adds a Start menu shortcut. Fo
 specific release:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.ps1))) -Version v0.3.0
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.ps1))) -Version v0.4.0
 ```
 
 Linux needs GTK 4 and GStreamer at runtime, for example on Ubuntu:
@@ -121,7 +121,7 @@ with a searchable session list.
 | Linux (GTK 4.14+) | GTK 4, x86_64 |
 
 Native window capture is implemented on all three; if a platform cannot capture a
-window, Sessiontree falls back to a rendered share image.
+window, SessionTree falls back to a rendered share image.
 
 ## Build
 
@@ -138,8 +138,18 @@ artifacts on every `main` push; a `v*` tag publishes those archives to one GitHu
 release. The install scripts are served from `raw.githubusercontent.com` and verify release
 checksums.
 
+## Languages
+
+SessionTree follows the system language and ships English, 简体中文 and 日本語. Pick
+another one from the language menu (the globe button) in the toolbar; the choice is
+remembered. Set `SESSIONTREE_LANG=en`, `zh` or `ja` to override it on launch.
+
 ## Privacy
 
 Everything is local. The app reads transcript files and SQLite stores, keeps a metadata
 cache in the platform's application-support directory, and writes a screenshot to the
 clipboard only when you ask.
+
+## License
+
+[MIT](LICENSE)

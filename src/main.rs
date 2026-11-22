@@ -55,14 +55,16 @@ fn app() -> Result<ExitCode, Box<dyn std::error::Error>> {
     platform::set_ui_sets(vec![sessiontree::__nsh_native_module()]);
     let options = platform::AppOptions {
         app_id: "com.hacken.sessiontree".into(),
-        title: "Sessiontree".into(),
+        title: "SessionTree".into(),
         size: (1280, 850),
         appearance: platform::Appearance::Dark,
         ..Default::default()
     };
     let result = platform::run_app(
         platform::AppSource::Rust(
-            platform::Root::of::<sessiontree::App>().app_id("com.hacken.sessiontree"),
+            platform::Root::of::<sessiontree::App>()
+                .app_id("com.hacken.sessiontree")
+                .translations(sessiontree::translations()),
         ),
         options,
     );

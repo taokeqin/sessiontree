@@ -108,11 +108,16 @@ fn rust_ui_scans_and_drills_into_sessions() {
         std::env::set_var("SESSIONTREE_ANTIGRAVITY_ROOT", dir.join("no-antigravity"));
         std::env::set_var("SESSIONTREE_KIRO_ROOT", dir.join("no-kiro"));
         std::env::set_var("SESSIONTREE_CACHE", dir.join("cache.json"));
+        std::env::set_var("SESSIONTREE_LANG", "en");
     }
 
     let mut ui = Headless::start(EngineConfig {
         viewport: size(px(1280.), px(850.)),
-        ..EngineConfig::new(Root::of::<sessiontree::App>())
+        ..EngineConfig::new(
+            Root::of::<sessiontree::App>()
+                .app_id("com.hacken.sessiontree")
+                .translations(sessiontree::translations()),
+        )
     })
     .unwrap();
 
@@ -120,10 +125,12 @@ fn rust_ui_scans_and_drills_into_sessions() {
     ui.wait_for("label:Open Claude Code").unwrap();
     ui.wait_for("label:Open OpenCode").unwrap();
     ui.wait_for("text:Claude Code · 1").unwrap();
+    ui.wait_for("text:Overview").unwrap();
 
     // Agent -> project -> session.
     ui.press("label:Open Claude Code").unwrap();
     ui.wait_for("label:Open project-x").unwrap();
+    ui.wait_for("text:Every project under this agent.").unwrap();
     ui.press("label:Open project-x").unwrap();
     ui.wait_for("label:Open fix the tests").unwrap();
     ui.press("label:Open fix the tests").unwrap();

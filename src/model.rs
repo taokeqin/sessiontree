@@ -1,5 +1,6 @@
 //! Sessions, aggregates, and the platform-independent treemap geometry.
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
+use nsh_core::t;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -75,18 +76,18 @@ impl Metric {
         })
         .max(1e-6)
     }
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Tokens => "Tokens",
-            Self::Cost => "Cost",
-            Self::Messages => "Messages",
+            Self::Tokens => t!("metric.tokens"),
+            Self::Cost => t!("metric.cost"),
+            Self::Messages => t!("metric.messages"),
         }
     }
-    pub fn hint(self) -> &'static str {
+    pub fn hint(self) -> String {
         match self {
-            Self::Tokens => "Tile area = input + output tokens",
-            Self::Cost => "Tile area = cost in USD",
-            Self::Messages => "Tile area = messages",
+            Self::Tokens => t!("metric.tokens_hint"),
+            Self::Cost => t!("metric.cost_hint"),
+            Self::Messages => t!("metric.messages_hint"),
         }
     }
     pub fn amount(self, node: &Node) -> f64 {
@@ -110,6 +111,7 @@ impl Metric {
 pub(crate) enum TimeRange {
     #[default]
     All,
+    Last1,
     Last7,
     Last30,
     Last90,
@@ -120,23 +122,25 @@ pub(crate) enum TimeRange {
 }
 
 impl TimeRange {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::All => "All",
-            Self::Last7 => "7D",
-            Self::Last30 => "30D",
-            Self::Last90 => "90D",
-            Self::Custom { .. } => "Custom",
+            Self::All => t!("range.all"),
+            Self::Last1 => t!("range.1d"),
+            Self::Last7 => t!("range.7d"),
+            Self::Last30 => t!("range.30d"),
+            Self::Last90 => t!("range.90d"),
+            Self::Custom { .. } => t!("range.custom"),
         }
     }
 
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            Self::All => "All time",
-            Self::Last7 => "Last 7 days",
-            Self::Last30 => "Last 30 days",
-            Self::Last90 => "Last 90 days",
-            Self::Custom { .. } => "Custom range",
+            Self::All => t!("range.title.all"),
+            Self::Last1 => t!("range.title.1d"),
+            Self::Last7 => t!("range.title.7d"),
+            Self::Last30 => t!("range.title.30d"),
+            Self::Last90 => t!("range.title.90d"),
+            Self::Custom { .. } => t!("range.title.custom"),
         }
     }
 
@@ -147,6 +151,7 @@ impl TimeRange {
     pub fn contains(self, last_ts: i64, now: i64) -> bool {
         match self {
             Self::All => true,
+            Self::Last1 => last_ts >= local_day_start(now, 0),
             Self::Last7 => last_ts >= local_day_start(now, 6),
             Self::Last30 => last_ts >= local_day_start(now, 29),
             Self::Last90 => last_ts >= local_day_start(now, 89),
@@ -157,6 +162,7 @@ impl TimeRange {
     pub fn chart_days(self) -> usize {
         match self {
             Self::All => 30,
+            Self::Last1 => 1,
             Self::Last7 => 7,
             Self::Last30 => 30,
             Self::Last90 => 90,
@@ -176,6 +182,7 @@ impl TimeRange {
     pub fn storage_value(self) -> String {
         match self {
             Self::All => "all".into(),
+            Self::Last1 => "1d".into(),
             Self::Last7 => "7d".into(),
             Self::Last30 => "30d".into(),
             Self::Last90 => "90d".into(),
@@ -186,6 +193,7 @@ impl TimeRange {
     pub fn from_storage(value: &str) -> Option<Self> {
         match value {
             "all" => Some(Self::All),
+            "1d" => Some(Self::Last1),
             "7d" => Some(Self::Last7),
             "30d" => Some(Self::Last30),
             "90d" => Some(Self::Last90),
@@ -215,12 +223,12 @@ fn local_day_start(now: i64, days_back: i64) -> i64 {
 
 /// Parses two local `YYYY-MM-DD` dates into an inclusive custom range.
 pub(crate) fn parse_custom_range(start: &str, end: &str) -> Result<TimeRange, String> {
-    let parse = |value: &str, label: &str| {
+    let parse = |value: &str, label_key: &str| {
         NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d")
-            .map_err(|_| format!("{label} must be YYYY-MM-DD"))
+            .map_err(|_| t!("range.error.format", label = t!(label_key)))
     };
-    let first = parse(start, "Start")?;
-    let last = parse(end, "End")?;
+    let first = parse(start, "range.error.start")?;
+    let last = parse(end, "range.error.end")?;
     let (first, last) = if first <= last {
         (first, last)
     } else {
@@ -229,12 +237,12 @@ pub(crate) fn parse_custom_range(start: &str, end: &str) -> Result<TimeRange, St
     let start = first
         .and_hms_opt(0, 0, 0)
         .and_then(|time| Local.from_local_datetime(&time).single())
-        .ok_or_else(|| "Start is not a valid local date".to_owned())?
+        .ok_or_else(|| t!("range.error.start_invalid"))?
         .timestamp_millis();
     let end = last
         .and_hms_milli_opt(23, 59, 59, 999)
         .and_then(|time| Local.from_local_datetime(&time).single())
-        .ok_or_else(|| "End is not a valid local date".to_owned())?
+        .ok_or_else(|| t!("range.error.end_invalid"))?
         .timestamp_millis();
     Ok(TimeRange::Custom { start, end })
 }
@@ -926,6 +934,23 @@ mod tests {
         assert_eq!(month.root.children.len(), 1);
         assert_eq!(month.root.children[0].sessions, 2);
         assert_eq!(snapshot.filtered(TimeRange::All, now).root.sessions, 3);
+    }
+
+    #[test]
+    fn a_one_day_range_keeps_today_in_local_time() {
+        let now = at(2026, 11, 21, 12);
+        let snapshot = build_tree(
+            vec![
+                session("morning", at(2026, 11, 21, 1), 10),
+                session("late-yesterday", at(2026, 11, 20, 23), 20),
+            ],
+            Vec::new(),
+            0,
+        );
+        let day = snapshot.filtered(TimeRange::Last1, now);
+        assert_eq!(day.root.sessions, 1);
+        assert_eq!(day.root.input, 10);
+        assert_eq!(TimeRange::from_storage("1d"), Some(TimeRange::Last1));
     }
 
     #[test]
