@@ -50,7 +50,7 @@ pub fn activate(tag: &str) {
     let locale = if normalize(tag) == SYSTEM {
         None
     } else {
-        Locale::parse(&tag)
+        Locale::parse(tag)
     };
     nsh_core::i18n::set_locale(locale);
 }
@@ -81,6 +81,17 @@ pub fn short_code(tag: &str) -> &'static str {
         "ja" => "日",
         _ => "EN",
     }
+}
+
+/// `tag` as one we ship, else `system`.
+fn normalize(tag: &str) -> String {
+    let tag = tag.trim();
+    LANGUAGES
+        .iter()
+        .map(|(tag, _)| *tag)
+        .find(|known| matches(tag, known))
+        .map(str::to_owned)
+        .unwrap_or_else(|| SYSTEM.to_owned())
 }
 
 #[cfg(test)]
@@ -115,15 +126,4 @@ mod tests {
         assert_eq!(normalize("zh-CN"), "zh");
         assert_eq!(normalize("fr"), SYSTEM);
     }
-}
-
-/// `tag` as one we ship, else `system`.
-fn normalize(tag: &str) -> String {
-    let tag = tag.trim();
-    LANGUAGES
-        .iter()
-        .map(|(tag, _)| *tag)
-        .find(|known| matches(tag, known))
-        .map(str::to_owned)
-        .unwrap_or_else(|| SYSTEM.to_owned())
 }
