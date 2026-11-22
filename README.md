@@ -74,7 +74,7 @@ to upgrade.
 
 ```sh
 # A specific release
-curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.4.0
+curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.5.0
 
 # Another location (the folder that holds Sessiontree.app / Sessiontree/)
 curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --dir /Applications
@@ -90,7 +90,7 @@ This installs to `%LOCALAPPDATA%\Sessiontree` and adds a Start menu shortcut. Fo
 specific release:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.ps1))) -Version v0.4.0
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.ps1))) -Version v0.5.0
 ```
 
 Linux needs GTK 4 and GStreamer at runtime, for example on Ubuntu:
