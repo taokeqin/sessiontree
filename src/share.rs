@@ -207,6 +207,7 @@ pub(crate) fn painter(
     levels: u8,
     options: ShareOptions,
     frame: (f32, f32),
+    range: TimeRange,
 ) -> (Painter, f32) {
     let labels = labels(root);
     let root_label = t!("root.all_sessions");
@@ -234,9 +235,28 @@ pub(crate) fn painter(
         p,
         &fit(&title, WIDTH - 104.0, 30.0),
         52.0,
-        114.0,
+        112.0,
         style(30.0, 600, INK),
     );
+    p = text(p, &range.title(), 52.0, 152.0, style(11.0, 400, MUTED));
+
+    let hero = if options.mask_numbers {
+        "•••".to_owned()
+    } else {
+        metric.value(node)
+    };
+    p = text(
+        p,
+        &fit(&hero, WIDTH - 104.0, 36.0),
+        52.0,
+        176.0,
+        style(36.0, 600, INK),
+    );
+    let hero_label = match metric {
+        Metric::Cost => t!("stat.cost"),
+        _ => metric.label().to_uppercase(),
+    };
+    p = text(p, &hero_label, 52.0, 220.0, style(10.0, 600, MUTED));
 
     let metric_label = metric.label().to_lowercase();
     let summary = if options.mask_numbers {
@@ -246,11 +266,11 @@ pub(crate) fn painter(
             "share.summary",
             sessions = count(node.sessions),
             tokens = compact(node.tokens()),
-            cost = money(node.cost),
+            cost = cost_text(node),
             metric = metric_label
         )
     };
-    p = text(p, &summary, 52.0, 156.0, style(12.0, 400, MUTED));
+    p = text(p, &summary, 52.0, 242.0, style(12.0, 400, MUTED));
 
     // The map keeps the on-screen frame's aspect, so its tiles are the ones
     // the window shows, not a re-flow at a different shape.
@@ -267,7 +287,7 @@ pub(crate) fn painter(
         map_h = map_w / map_aspect;
     }
     let map_x = (WIDTH - map_w) / 2.0;
-    let map_y = 194.0;
+    let map_y = 274.0;
     let map_scale = map_w / frame.0.max(1.0);
 
     p = rounded(p, area(map_x, map_y, map_w, map_h), 8.0, rgb(MAP), None);

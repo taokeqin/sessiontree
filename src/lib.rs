@@ -2,6 +2,9 @@
 mod capture;
 mod i18n;
 mod model;
+mod paths;
+mod pricing;
+mod report;
 mod scan;
 mod share;
 mod state;

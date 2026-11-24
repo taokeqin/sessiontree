@@ -512,6 +512,10 @@ fn toolbar(s: State, search_field: &ElementRef) -> impl IntoElement {
         .window_drag(true)
         .child(app_mark())
         .child(caption("SessionTree", 17., INK).font_weight(FontWeight::SEMIBOLD))
+        .child(metric_control(s))
+        .child(view().w(px(1.)).h(px(20.)).bg(rgb(LINE)))
+        .child(range_control(s))
+        .child(view().flex_1())
         .child(search_input(
             s.query,
             move || t!("search.placeholder"),
@@ -519,7 +523,6 @@ fn toolbar(s: State, search_field: &ElementRef) -> impl IntoElement {
             "global-search",
             Some(search_field),
         ))
-        .child(view().flex_1())
         .child(
             control(
                 move || t!("action.share"),
@@ -557,47 +560,50 @@ fn toolbar(s: State, search_field: &ElementRef) -> impl IntoElement {
             .tooltip(tip(move || t!("action.compare_tip"))),
         )
         .child(language_menu(s))
-        .child(view().w(px(1.)).h(px(20.)).mx(px(4.)).bg(rgb(LINE)))
-        .child(
-            row()
-                .gap(px(2.))
-                .p(px(3.))
-                .rounded(px(8.))
-                .bg(rgb(0x0b0b0d))
-                .border_1()
-                .border_color(rgb(LINE))
-                .children(
-                    [Metric::Tokens, Metric::Cost, Metric::Messages]
-                        .into_iter()
-                        .map(move |metric| {
-                            view()
-                                .role(AccessibilityRole::Tab)
-                                .label(move || metric.label())
-                                .accessibility_state(move || nsh_core::AccessibilityState {
-                                    selected: s.metric.get() == metric,
-                                    ..Default::default()
-                                })
-                                .window_drag(false)
-                                .on_press(move |_: &()| s.metric.set(metric))
-                                .h(px(26.))
-                                .px(px(12.))
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(5.))
-                                .bg(move || {
-                                    rgba(if s.metric.get() == metric {
-                                        0x24242aff
-                                    } else {
-                                        0
-                                    })
-                                })
-                                .hover(|s| s.bg(rgb(0x1a1a1f)))
-                                .active(|s| s.bg(rgb(0x2a2a30)))
-                                .child(caption(move || metric.label(), 11., INK).text_color(
-                                    move || rgb(if s.metric.get() == metric { INK } else { MUTED }),
-                                ))
-                        }),
-                ),
+}
+
+fn metric_control(s: State) -> impl IntoElement {
+    row()
+        .gap(px(2.))
+        .p(px(3.))
+        .rounded(px(8.))
+        .bg(rgb(0x0b0b0d))
+        .border_1()
+        .border_color(rgb(LINE))
+        .window_drag(false)
+        .children(
+            [Metric::Tokens, Metric::Cost, Metric::Messages]
+                .into_iter()
+                .map(move |metric| {
+                    view()
+                        .role(AccessibilityRole::Tab)
+                        .label(move || metric.label())
+                        .accessibility_state(move || nsh_core::AccessibilityState {
+                            selected: s.metric.get() == metric,
+                            ..Default::default()
+                        })
+                        .window_drag(false)
+                        .on_press(move |_: &()| s.metric.set(metric))
+                        .h(px(26.))
+                        .px(px(12.))
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(5.))
+                        .bg(move || {
+                            rgba(if s.metric.get() == metric {
+                                0x24242aff
+                            } else {
+                                0
+                            })
+                        })
+                        .hover(|s| s.bg(rgb(0x1a1a1f)))
+                        .active(|s| s.bg(rgb(0x2a2a30)))
+                        .child(
+                            caption(move || metric.label(), 11., INK).text_color(move || {
+                                rgb(if s.metric.get() == metric { INK } else { MUTED })
+                            }),
+                        )
+                }),
         )
 }
 
@@ -636,10 +642,12 @@ fn range_control(s: State) -> impl IntoElement {
         .bg(rgb(0x0b0b0d))
         .border_1()
         .border_color(rgb(LINE))
+        .window_drag(false)
         .children(options.into_iter().map(move |range| {
             let custom = matches!(range, TimeRange::Custom { .. });
             view()
                 .role(AccessibilityRole::Tab)
+                .window_drag(false)
                 .label(move || range.title())
                 .accessibility_state(move || nsh_core::AccessibilityState {
                     selected: if custom {
@@ -732,7 +740,6 @@ fn path_bar(s: State) -> impl IntoElement {
                 move |item, _| crumb(s, item),
             )),
         ))
-        .child(range_control(s))
         .child(
             view()
                 .w(px(250.))
@@ -750,7 +757,7 @@ fn path_bar(s: State) -> impl IntoElement {
                                     "summary.scope",
                                     sessions = count(node.sessions),
                                     tokens = compact(node.tokens()),
-                                    cost = money(node.cost)
+                                    cost = cost_text(&node)
                                 )
                             }
                         },
@@ -1088,7 +1095,7 @@ fn compare_row(s: State, agent: ReadSignal<Arc<Node>>) -> impl IntoElement {
                 .child(compare_number(move || compact(agent.get().input), 66.))
                 .child(compare_number(move || compact(agent.get().output), 66.))
                 .child(compare_number(move || compact(agent.get().cache()), 66.))
-                .child(compare_number(move || money(agent.get().cost), 66.))
+                .child(compare_number(move || cost_text(&agent.get()), 66.))
                 .child(compare_number(move || count(agent.get().messages), 66.))
                 .child(compare_number(
                     move || {
@@ -1432,6 +1439,26 @@ fn share_dialog(s: State) -> impl IntoElement {
                             move || t!("share.numbers_detail"),
                             s.share_numbers,
                         ))
+                        .child(caption(move || t!("share.export"), 9., MUTED))
+                        .child(
+                            row()
+                                .gap(px(8.))
+                                .child(button(
+                                    move || t!("share.copy_card"),
+                                    move || s.share_busy.get(),
+                                    move || s.copy_card(),
+                                ))
+                                .child(button(
+                                    move || t!("share.save_report"),
+                                    move || s.share_busy.get(),
+                                    move || s.save_report(),
+                                ))
+                                .child(button(
+                                    move || t!("share.save_csv"),
+                                    move || s.share_busy.get(),
+                                    move || s.save_csv(),
+                                )),
+                        )
                         .child(
                             caption(move || s.share_status.get(), 10., MUTED)
                                 .text_color(move || {
@@ -1642,7 +1669,7 @@ fn scope_summary(s: State) -> impl IntoElement {
                     move || t!("stat.in_out"),
                     move || format!("{} / {}", compact(node().input), compact(node().output)),
                 ))
-                .child(stat(move || t!("stat.cost"), move || money(node().cost))),
+                .child(stat(move || t!("stat.cost"), move || cost_text(&node()))),
         )
         .child(
             row()
@@ -1682,7 +1709,12 @@ fn activity_chart(s: State) -> impl IntoElement {
     let series = computed(move || {
         let range = s.range.get();
         let end = range.chart_end(now_millis());
-        daily_series(&s.current(), s.metric.get(), range.chart_days(), end)
+        let node = s.current();
+        if range.chart_days() == 1 {
+            hourly_series(&node, s.metric.get(), end)
+        } else {
+            daily_series(&node, s.metric.get(), range.chart_days(), end)
+        }
     });
     let peak = computed(move || series.get().into_iter().fold(0.0_f64, f64::max));
     let label = move || {
@@ -2162,7 +2194,7 @@ fn details_page(s: State) -> impl IntoElement {
             .child(
                 row()
                     .gap(px(14.))
-                    .child(stat(move || t!("stat.cost"), move || money(node().cost)))
+                    .child(stat(move || t!("stat.cost"), move || cost_text(&node())))
                     .child(stat(
                         move || t!("stat.last"),
                         move || {

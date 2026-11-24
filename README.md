@@ -1,8 +1,9 @@
 # SessionTree
 
-A native treemap explorer for the AI coding-agent sessions already on your machine.
-Built with [Native Shell](https://nsh.dev) and Rust, it renders local history as a
-drill-down map: **agent → project → session**.
+**Local, cross-platform AI coding usage, from the logs already on your machine.**
+SessionTree renders **agent → project → session** as a drill-down treemap. Token counts
+come from the agents' own logs, dollar amounts are transparent estimates from a bundled
+price table, and nothing is uploaded. Built with [Native Shell](https://nsh.dev) and Rust.
 
 ![SessionTree showing token and cost usage across masked agents, projects and sessions](assets/screenshot.png)
 
@@ -11,16 +12,17 @@ with `Agent N`, `Project N` and `Session N` before the screenshot is copied.*
 
 ## Share without leaking your work
 
-Click **Share** in the toolbar (**⇧⌘S** on macOS, **Ctrl+Shift+S** on Windows and Linux)
-to copy the current window as a PNG. Before copying, SessionTree can replace:
+Click **Share** in the toolbar (**⇧⌘S** on macOS, **Ctrl+Shift+S** on Windows and Linux).
+Agent names, project names and session titles are masked by default; unmask only what you
+mean to show. SessionTree can also mask counts, tokens, cost and dates.
 
-- agent names
-- project names
-- session titles
-- counts, tokens, cost and dates
+- **Copy card** renders a standalone PNG poster: period, the selected metric, the treemap
+  and the top agents/projects under the current scope.
+- **Copy window** captures the current window as it looks, with the same masks applied.
+- **Save report…** writes a Markdown summary, breakdown and top sessions.
+- **Save CSV…** writes one row per session for spreadsheets and audits.
 
-The masked window is captured and the real data is restored immediately afterwards. The
-screenshot above was taken this way: names are masked, so it is safe to paste into a PR,
+The screenshot above used share mode: names are masked, so it is safe to paste into a PR,
 an issue or a chat. Nothing is uploaded anywhere.
 
 ## Compare agents
@@ -54,8 +56,21 @@ SessionTree is passive: it only reads local stores, never proxies or uploads.
 - Antigravity (agy)
 - Kiro
 
-Sessions are weighted by **tokens**, **cost** or **messages**. Costs use a built-in
-price table, including DeepSeek, GLM, MiMo, Qwen and Kimi model ids.
+Sessions are weighted by **tokens**, **cost** or **messages**.
+
+### About costs
+
+Token counts are read from each agent's local logs. Dollar amounts are **estimates**:
+they use a bundled price snapshot curated from community tables (LiteLLM and models.dev),
+so they can differ from what a vendor bills. This is especially true for Cursor, which
+exposes local token counts but not its credit and billing math; its cost cell shows `—`
+instead of a made-up number.
+
+To override a price, add a `pricing.json` next to `session-index.json` in the app data
+directory (`~/Library/Application Support/Sessiontree` on macOS,
+`%LOCALAPPDATA%\Sessiontree` on Windows, `~/.local/share/sessiontree` on Linux), or point
+`SESSIONTREE_PRICING` at it. The file uses the same shape as
+[`assets/pricing.json`](assets/pricing.json); its entries are tried first.
 
 ## Install
 
@@ -74,7 +89,7 @@ to upgrade.
 
 ```sh
 # A specific release
-curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.5.0
+curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --version v0.6.0
 
 # Another location (the folder that holds Sessiontree.app / Sessiontree/)
 curl -fsSL https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.sh | sh -s -- --dir /Applications
@@ -90,7 +105,7 @@ This installs to `%LOCALAPPDATA%\Sessiontree` and adds a Start menu shortcut. Fo
 specific release:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.ps1))) -Version v0.5.0
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/taokeqin/sessiontree/main/install.ps1))) -Version v0.6.0
 ```
 
 Linux needs GTK 4 and GStreamer at runtime, for example on Ubuntu:

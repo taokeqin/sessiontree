@@ -1,5 +1,5 @@
 //! Sessions, aggregates, and the platform-independent treemap geometry.
-use chrono::{Datelike, Local, NaiveDate, TimeZone};
+use chrono::{Datelike, Local, NaiveDate, TimeZone, Timelike};
 use nsh_core::t;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -100,7 +100,7 @@ impl Metric {
     pub fn value(self, node: &Node) -> String {
         match self {
             Self::Tokens => compact(node.tokens()),
-            Self::Cost => money(node.cost),
+            Self::Cost => cost_text(node),
             Self::Messages => count(node.messages),
         }
     }
@@ -355,6 +355,43 @@ pub(crate) fn daily_series(node: &Node, metric: Metric, days: usize, end: i64) -
         }
     }
     walk(node, metric, start_day, days, &mut series);
+    series
+}
+
+/// One value per local hour of `end`'s day, midnight first. A single-day
+/// range uses this instead of one useless daily bar.
+pub(crate) fn hourly_series(node: &Node, metric: Metric, end: i64) -> Vec<f64> {
+    let mut series = vec![0.0; 24];
+    let day = chrono::DateTime::from_timestamp_millis(end)
+        .map(|time| time.with_timezone(&Local).date_naive())
+        .unwrap_or_else(|| Local::now().date_naive());
+    let start = day
+        .and_hms_opt(0, 0, 0)
+        .and_then(|time| Local.from_local_datetime(&time).single())
+        .map(|time| time.timestamp_millis())
+        .unwrap_or(end);
+    let next = day.succ_opt().unwrap_or(day);
+    let stop = next
+        .and_hms_opt(0, 0, 0)
+        .and_then(|time| Local.from_local_datetime(&time).single())
+        .map(|time| time.timestamp_millis())
+        .unwrap_or(start + 86_400_000);
+    fn walk(node: &Node, metric: Metric, start: i64, stop: i64, series: &mut [f64]) {
+        if node.kind == "session" {
+            if node.last_ts >= start
+                && node.last_ts < stop
+                && let Some(hour) = chrono::DateTime::from_timestamp_millis(node.last_ts)
+                    .map(|time| time.with_timezone(&Local).hour())
+            {
+                series[hour as usize] += metric.amount(node);
+            }
+            return;
+        }
+        for child in &node.children {
+            walk(child, metric, start, stop, series);
+        }
+    }
+    walk(node, metric, start, stop, &mut series);
     series
 }
 
@@ -781,6 +818,16 @@ pub(crate) fn money(value: f64) -> String {
     }
 }
 
+/// A node's cost cell. Cursor exposes tokens but not its credit and billing
+/// math, so a zero there means unknown, not free.
+pub(crate) fn cost_text(node: &Node) -> String {
+    if !numbers_hidden() && node.cost <= 0.0 && node.tool == "Cursor" {
+        "—".into()
+    } else {
+        money(node.cost)
+    }
+}
+
 fn date(ts: i64) -> String {
     if ts <= 0 {
         return "—".into();
@@ -937,6 +984,22 @@ mod tests {
     }
 
     #[test]
+    fn cursor_cost_is_unknown_not_free() {
+        let mut node = Node {
+            tool: "Cursor".into(),
+            ..Default::default()
+        };
+        assert_eq!(cost_text(&node), "—");
+        node.cost = 1.5;
+        assert_eq!(cost_text(&node), "$1.50");
+        let other = Node {
+            tool: "Claude Code".into(),
+            ..Default::default()
+        };
+        assert_eq!(cost_text(&other), "$0.00");
+    }
+
+    #[test]
     fn a_one_day_range_keeps_today_in_local_time() {
         let now = at(2026, 11, 21, 12);
         let snapshot = build_tree(
@@ -987,6 +1050,25 @@ mod tests {
         assert_eq!(series.len(), 7);
         assert_eq!(series[4], 20.0);
         assert_eq!(series[5], 10.0);
+        assert_eq!(series.iter().sum::<f64>(), 30.0);
+    }
+
+    #[test]
+    fn an_hourly_series_buckets_one_day_by_last_activity() {
+        let now = at(2026, 11, 21, 12);
+        let snapshot = build_tree(
+            vec![
+                session("nine", at(2026, 11, 21, 9), 10),
+                session("ten", at(2026, 11, 21, 10), 20),
+                session("yesterday", at(2026, 11, 20, 23), 40),
+            ],
+            Vec::new(),
+            0,
+        );
+        let series = hourly_series(&snapshot.root, Metric::Tokens, now);
+        assert_eq!(series.len(), 24);
+        assert_eq!(series[9], 10.0);
+        assert_eq!(series[10], 20.0);
         assert_eq!(series.iter().sum::<f64>(), 30.0);
     }
 

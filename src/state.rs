@@ -2,10 +2,10 @@
 use crate::{
     capture, i18n,
     model::*,
-    scan,
+    pricing, report, scan,
     share::{self, ShareOptions},
 };
-use nsh_core::{prelude::*, storage::Storage};
+use nsh_core::{file_dialog::SaveDialog, prelude::*, storage::Storage};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy)]
@@ -56,6 +56,14 @@ fn local_date(ts: i64) -> String {
         .unwrap_or_default()
 }
 
+fn size_label(bytes: usize) -> String {
+    if bytes >= 1_048_576 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else {
+        format!("{} KB", (bytes / 1024).max(1))
+    }
+}
+
 impl State {
     pub fn new() -> Self {
         Self {
@@ -74,9 +82,9 @@ impl State {
             generation: signal(0),
             seconds: signal(0),
             share_open: signal(false),
-            share_agents: signal(false),
-            share_projects: signal(false),
-            share_sessions: signal(false),
+            share_agents: signal(true),
+            share_projects: signal(true),
+            share_sessions: signal(true),
             share_numbers: signal(false),
             share_busy: signal(false),
             share_status: signal(t!("state.share_status")),
@@ -297,6 +305,7 @@ impl State {
         let metric = self.metric.get_untracked();
         let levels = self.levels.get_untracked();
         let frame = self.map_frame.get_untracked();
+        let range = self.range.get_untracked();
         let options = self.share_options();
         let masked = options.mask_agents || options.mask_projects || options.mask_sessions;
         let redacted_root = share::redacted(&root, options);
@@ -350,8 +359,15 @@ impl State {
                     }
                 });
                 if png.is_none() {
-                    let (painter, height) =
-                        share::painter(&node, &original.root, metric, levels, options, frame);
+                    let (painter, height) = share::painter(
+                        &node,
+                        &original.root,
+                        metric,
+                        levels,
+                        options,
+                        frame,
+                        range,
+                    );
                     match share::render(painter, height).await {
                         Ok(bytes) => png = Some(bytes),
                         Err(reason) => {
@@ -363,11 +379,7 @@ impl State {
                     match png {
                         Some(bytes) => {
                             set_clipboard_image(share::data_uri(&bytes));
-                            let size = if bytes.len() >= 1_048_576 {
-                                format!("{:.1} MB", bytes.len() as f64 / 1_048_576.0)
-                            } else {
-                                format!("{} KB", (bytes.len() / 1024).max(1))
-                            };
+                            let size = size_label(bytes.len());
                             if captured_window {
                                 self.message.set(t!("state.copied", size = size));
                             } else {
@@ -379,6 +391,109 @@ impl State {
                         }
                     }
                     self.share_status.set(t!("share.ready"));
+                    self.share_busy.set(false);
+                });
+            })
+        });
+    }
+
+    /// Copies the rendered share card (the poster, not the window) as PNG.
+    pub fn copy_card(self) {
+        if self.share_busy.get_untracked() {
+            return;
+        }
+        let snapshot = self.snapshot.get_untracked();
+        let scope = self.scope.get_untracked();
+        let node = find(&snapshot.root, &scope)
+            .cloned()
+            .unwrap_or_else(|| snapshot.root.clone());
+        let metric = self.metric.get_untracked();
+        let levels = self.levels.get_untracked();
+        let frame = self.map_frame.get_untracked();
+        let range = self.range.get_untracked();
+        let options = self.share_options();
+        batch(|| {
+            self.share_busy.set(true);
+            self.share_status.set(t!("state.rendering_card"));
+            self.message.set(t!("state.updated_just_now"));
+            self.share_open.set(false);
+            self.hovered.set(Vec::new());
+        });
+        self.owner.run(move || {
+            spawn(async move {
+                let (painter, height) =
+                    share::painter(&node, &snapshot.root, metric, levels, options, frame, range);
+                let result = share::render(painter, height).await;
+                batch(|| {
+                    match result {
+                        Ok(bytes) => {
+                            set_clipboard_image(share::data_uri(&bytes));
+                            self.message
+                                .set(t!("state.copied_card", size = size_label(bytes.len())));
+                        }
+                        Err(error) => {
+                            self.message
+                                .set(t!("state.card_failed", error = format!("{error:?}")));
+                        }
+                    }
+                    self.share_status.set(t!("share.ready"));
+                    self.share_busy.set(false);
+                });
+            })
+        });
+    }
+
+    /// Saves a Markdown report of the current scope and period.
+    pub fn save_report(self) {
+        let node = self.current();
+        let range = self.range.get_untracked();
+        let metric = self.metric.get_untracked();
+        let text = report::markdown(
+            &node,
+            &range.title(),
+            metric,
+            &metric.label(),
+            &pricing::source(),
+        );
+        let name = format!("sessiontree-report-{}.md", local_date(now_millis()));
+        self.save_text(text, name, t!("share.save_report"));
+    }
+
+    /// Saves one CSV row per session under the current scope.
+    pub fn save_csv(self) {
+        let node = self.current();
+        let text = report::csv(&node);
+        let name = format!("sessiontree-sessions-{}.csv", local_date(now_millis()));
+        self.save_text(text, name, t!("share.save_csv"));
+    }
+
+    fn save_text(self, text: String, name: String, title: String) {
+        if self.share_busy.get_untracked() {
+            return;
+        }
+        batch(|| {
+            self.share_busy.set(true);
+            self.share_status.set(t!("share.saving"));
+        });
+        self.owner.run(move || {
+            spawn(async move {
+                let dialog = SaveDialog::new().file_name(name.clone()).title(title);
+                let status = match pick_save_path(dialog).await {
+                    Ok(Some(path)) => match std::fs::write(&path, text) {
+                        Ok(()) => t!(
+                            "share.saved",
+                            name = path
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or(&name)
+                        ),
+                        Err(error) => t!("share.save_failed", error = error.to_string()),
+                    },
+                    Ok(None) => t!("share.ready"),
+                    Err(error) => t!("share.save_failed", error = error),
+                };
+                batch(|| {
+                    self.share_status.set(status);
                     self.share_busy.set(false);
                 });
             })

@@ -170,14 +170,16 @@ jobs:
             ## Highlights
 
             - Ships in English, 简体中文 and 日本語, following the system language.
+            - Transparent costs: token counts come from local logs; dollar amounts are estimates
+              from a bundled price table and can be overridden with `pricing.json`.
+            - Share card, Markdown report and CSV export, with names masked by default.
+            - Filters for metric and time range grouped in the title bar; 1D activity is hourly.
             - Filter every agent, project and session by All, 1D, 7D, 30D, 90D or a custom date range.
-            - See daily token, cost or message activity for the selected scope and period.
             - Fold Claude Code subagent transcripts into their parent session, so totals and
               session rows stay correct.
             - Compare every agent side by side by sessions, input, output, cache, cost, messages
               and share of the selected metric.
             - Global search across agents, projects, session titles, models and file paths.
-            - Redacted sharing that masks names, counts, tokens, cost and dates before copying.
 
             ## Downloads
 

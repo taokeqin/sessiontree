@@ -7,7 +7,11 @@
 //! metadata keeps relaunches fast without re-reading gigabytes of unchanged
 //! transcripts.
 
-use crate::model::*;
+use crate::{
+    model::*,
+    paths::{app_dir, env_path, home_dir},
+    pricing::{self, price_for},
+};
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -59,6 +63,7 @@ pub(crate) fn scan() -> Snapshot {
     DONE.store(0, Ordering::Relaxed);
     TOTAL.store(0, Ordering::Relaxed);
     SESSIONS.store(0, Ordering::Relaxed);
+    pricing::reload();
 
     let started = Instant::now();
     let mut errors = Vec::new();
@@ -255,7 +260,7 @@ pub(crate) fn report() -> Result<String, String> {
     let snapshot = scan();
     let mut out = String::new();
     out.push_str(&format!(
-        "SessionTree static index\n  sessions:  {}\n  messages:  {}\n  tokens:    {} in / {} out / {} cache\n  cost:      {}\n  scanned:   {} ms ({} cached files)\n",
+        "SessionTree static index\n  sessions:  {}\n  messages:  {}\n  tokens:    {} in / {} out / {} cache\n  cost:      {}\n  scanned:   {} ms ({} cached files)\n  pricing:   {}\n",
         count(snapshot.root.sessions),
         count(snapshot.root.messages),
         compact(snapshot.root.input),
@@ -264,6 +269,7 @@ pub(crate) fn report() -> Result<String, String> {
         money(snapshot.root.cost),
         snapshot.scanned_ms,
         count(snapshot.cache_hits),
+        pricing::source(),
     ));
     for agent in &snapshot.root.children {
         out.push_str(&format!(
@@ -272,7 +278,7 @@ pub(crate) fn report() -> Result<String, String> {
             count(agent.sessions),
             count(agent.messages),
             compact(agent.tokens()),
-            money(agent.cost),
+            cost_text(agent),
             count(agent.children.len() as u64),
         ));
         for project in agent.children.iter().take(8) {
@@ -281,7 +287,7 @@ pub(crate) fn report() -> Result<String, String> {
                 truncate(&project.title, 44),
                 count(project.sessions),
                 compact(project.tokens()),
-                money(project.cost),
+                cost_text(project),
             ));
         }
     }
@@ -420,14 +426,8 @@ fn parse_claude_file(path: &Path, fallback_ts: i64) -> Result<Option<Session>, S
                 cache_read += turn_read;
                 cache_write += turn_write;
                 cost += price_for("anthropic", &model)
-                    .map(|price| {
-                        turn_input as f64 * price.0
-                            + turn_output as f64 * price.1
-                            + turn_read as f64 * price.2
-                            + turn_write as f64 * price.3
-                    })
-                    .unwrap_or(0.0)
-                    / 1_000_000.0;
+                    .map(|price| price.cost(turn_input, turn_output, turn_read, turn_write))
+                    .unwrap_or(0.0);
             }
         }
     }
@@ -1376,14 +1376,8 @@ fn parse_opencode_tool(path: &Path, tool: &str, prefix: &str) -> Result<Vec<Sess
         }
         if cost == 0.0 {
             cost = price_for(&provider, &model_id)
-                .map(|price| {
-                    input as f64 * price.0
-                        + (output + reasoning) as f64 * price.1
-                        + cache_read as f64 * price.2
-                        + cache_write as f64 * price.3
-                })
-                .unwrap_or(0.0)
-                / 1_000_000.0;
+                .map(|price| price.cost(input, output + reasoning, cache_read, cache_write))
+                .unwrap_or(0.0);
         }
         out.push(Session {
             key: format!("{prefix}:{id}"),
@@ -2772,187 +2766,13 @@ fn merge_session(existing: &mut Session, incoming: Session) {
 }
 
 // ---------------------------------------------------------------------------
-// Pricing, adapted from aishark's built-in table (USD per million tokens).
-
-type Price = (f64, f64, f64, f64);
-
-fn prefix(model: &str, prefix: &str) -> bool {
-    model.starts_with(prefix)
-}
-
-fn price_for(provider: &str, model: &str) -> Option<Price> {
-    let model = model.to_ascii_lowercase();
-    match provider {
-        "anthropic" => {
-            if prefix(&model, "claude-opus") || prefix(&model, "claude-3-opus") {
-                Some((15.0, 75.0, 1.5, 18.75))
-            } else if prefix(&model, "claude-sonnet") || prefix(&model, "claude-3-7") {
-                Some((3.0, 15.0, 0.3, 3.75))
-            } else if prefix(&model, "claude-haiku") || prefix(&model, "claude-3-5-haiku") {
-                Some((0.8, 4.0, 0.08, 1.0))
-            } else if prefix(&model, "claude-3-5-sonnet") || prefix(&model, "claude-3-sonnet") {
-                Some((3.0, 15.0, 0.3, 3.75))
-            } else if prefix(&model, "claude-3-haiku") {
-                Some((0.25, 1.25, 0.03, 0.3))
-            } else {
-                None
-            }
-        }
-        "openai" => {
-            if prefix(&model, "gpt-4o-mini") {
-                Some((0.15, 0.6, 0.075, 0.0))
-            } else if prefix(&model, "gpt-4o") {
-                Some((2.5, 10.0, 1.25, 0.0))
-            } else if prefix(&model, "gpt-4.1-mini") {
-                Some((0.4, 1.6, 0.1, 0.0))
-            } else if prefix(&model, "gpt-4.1-nano") {
-                Some((0.1, 0.4, 0.025, 0.0))
-            } else if prefix(&model, "gpt-4.1") {
-                Some((2.0, 8.0, 0.5, 0.0))
-            } else if prefix(&model, "gpt-5-mini") {
-                Some((0.25, 2.0, 0.025, 0.0))
-            } else if prefix(&model, "gpt-5-nano") {
-                Some((0.05, 0.4, 0.005, 0.0))
-            } else if prefix(&model, "gpt-5") {
-                Some((1.25, 10.0, 0.125, 0.0))
-            } else if prefix(&model, "o4-mini") {
-                Some((1.1, 4.4, 0.275, 0.0))
-            } else if prefix(&model, "o3-mini") {
-                Some((1.1, 4.4, 0.55, 0.0))
-            } else if prefix(&model, "o3") {
-                Some((2.0, 8.0, 0.5, 0.0))
-            } else {
-                None
-            }
-        }
-        "gemini" => {
-            if prefix(&model, "gemini-2.5-pro") {
-                Some((1.25, 10.0, 0.31, 0.0))
-            } else if prefix(&model, "gemini-2.5-flash") {
-                Some((0.3, 2.5, 0.075, 0.0))
-            } else if prefix(&model, "gemini-2.0-flash") {
-                Some((0.1, 0.4, 0.025, 0.0))
-            } else {
-                None
-            }
-        }
-        "deepseek" | "deepseek-official" => deepseek_price(&model),
-        "zai" | "zhipu" | "zcode" => zai_price(&model),
-        "xiaomi" | "mimo" => mimo_price(&model),
-        "qwen" => qwen_price(&model),
-        "moonshot" | "kimi" => kimi_price(&model),
-        _ => None,
-    }
-    .or_else(|| {
-        if model.contains("free") {
-            return None;
-        }
-        let model = model.rsplit('/').next().unwrap_or(&model);
-        if prefix(model, "deepseek") {
-            deepseek_price(model)
-        } else if prefix(model, "glm") {
-            zai_price(model)
-        } else if prefix(model, "mimo") {
-            mimo_price(model)
-        } else if prefix(model, "qwen") {
-            qwen_price(model)
-        } else if prefix(model, "kimi") {
-            kimi_price(model)
-        } else {
-            None
-        }
-    })
-}
-
-fn zai_price(model: &str) -> Option<Price> {
-    if prefix(model, "glm-4.5-air") {
-        Some((0.2, 1.1, 0.03, 0.0))
-    } else if prefix(model, "glm-4.5v") {
-        Some((0.6, 1.8, 0.11, 0.0))
-    } else if prefix(model, "glm-4.7-flash") {
-        Some((0.07, 0.4, 0.0, 0.0))
-    } else if prefix(model, "glm-5.3-flash") {
-        Some((0.15, 0.5, 0.03, 0.0))
-    } else if prefix(model, "glm-5-turbo") {
-        Some((1.2, 4.0, 0.24, 0.0))
-    } else if prefix(model, "glm-5.3") {
-        Some((1.4, 4.4, 0.14, 0.0))
-    } else if prefix(model, "glm-5.2") || prefix(model, "glm-5.1") {
-        Some((1.4, 4.4, 0.26, 0.0))
-    } else if prefix(model, "glm-5") {
-        Some((1.0, 3.2, 0.2, 0.0))
-    } else if prefix(model, "glm-4.5") || prefix(model, "glm-4.6") || prefix(model, "glm-4.7") {
-        Some((0.6, 2.2, 0.11, 0.0))
-    } else {
-        None
-    }
-}
-
-fn mimo_price(model: &str) -> Option<Price> {
-    if prefix(model, "mimo-v2.6-pro-ultraspeed") {
-        Some((4.35, 8.7, 0.036, 0.0))
-    } else if prefix(model, "mimo-v2.6-pro") || prefix(model, "mimo-v2.5-pro-ultraspeed") {
-        Some((0.435, 0.87, 0.0036, 0.0))
-    } else if prefix(model, "mimo-v2.5-pro") {
-        Some((0.3045, 0.609, 0.0028, 0.0))
-    } else if prefix(model, "mimo") {
-        Some((0.14, 0.28, 0.0028, 0.0))
-    } else {
-        None
-    }
-}
-
-fn qwen_price(model: &str) -> Option<Price> {
-    if prefix(model, "qwen3-coder") {
-        Some((0.3, 1.0, 0.1, 0.0))
-    } else if prefix(model, "qwen3.8-max") || prefix(model, "qwen3.7-max") {
-        Some((2.0, 6.0, 0.25, 0.0))
-    } else if prefix(model, "qwen3.7-flash") {
-        Some((0.03, 0.13, 0.006, 0.0))
-    } else if prefix(model, "qwen3.8-flash") {
-        Some((0.15, 0.47, 0.016, 0.0))
-    } else {
-        None
-    }
-}
-
-fn kimi_price(model: &str) -> Option<Price> {
-    if prefix(model, "kimi-k3") {
-        Some((3.0, 15.0, 0.3, 0.0))
-    } else if prefix(model, "kimi-k2.7-code-highspeed") {
-        Some((1.9, 8.0, 0.38, 0.0))
-    } else if prefix(model, "kimi-k2.7-code") {
-        Some((0.95, 4.0, 0.19, 0.0))
-    } else if prefix(model, "kimi-k2.6") {
-        Some((0.95, 4.0, 0.16, 0.0))
-    } else if prefix(model, "kimi-k2.5") {
-        Some((0.6, 3.0, 0.1, 0.0))
-    } else if prefix(model, "kimi-k2") || prefix(model, "kimi-for-coding") {
-        Some((0.6, 2.5, 0.15, 0.0))
-    } else {
-        None
-    }
-}
-
-fn deepseek_price(model: &str) -> Option<Price> {
-    if prefix(model, "deepseek-v4-pro") {
-        Some((1.32, 3.96, 0.044, 0.0))
-    } else if prefix(model, "deepseek-v4-flash") {
-        Some((0.14, 0.28, 0.028, 0.0))
-    } else if prefix(model, "deepseek-v4.1") || prefix(model, "deepseek-flash") {
-        Some((0.3, 1.2, 0.006, 0.0))
-    } else {
-        Some((0.27, 1.1, 0.07, 0.0))
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Cache and shared helpers.
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(default)]
 struct Cache {
     version: u32,
+    pricing: u64,
     files: BTreeMap<String, CachedSession>,
     opencode: Option<CachedDb>,
     cursor: Option<CachedDb>,
@@ -2984,7 +2804,7 @@ impl Cache {
             return Self::default();
         };
         let cache: Self = serde_json::from_str(&text).unwrap_or_default();
-        if cache.version == SCAN_VERSION {
+        if cache.version == SCAN_VERSION && cache.pricing == pricing::fingerprint() {
             cache
         } else {
             Self::default()
@@ -2999,6 +2819,7 @@ impl Cache {
         }
         let cache = Self {
             version: SCAN_VERSION,
+            pricing: pricing::fingerprint(),
             files: self.files.clone(),
             opencode: self.opencode.clone(),
             cursor: self.cursor.clone(),
@@ -3014,37 +2835,6 @@ impl Cache {
 
 fn cache_path() -> Option<PathBuf> {
     env_path("SESSIONTREE_CACHE").or_else(|| Some(app_dir()?.join("session-index.json")))
-}
-
-fn app_dir() -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    let dir = home_dir().map(|home| home.join("Library/Application Support/Sessiontree"));
-    #[cfg(windows)]
-    let dir = env_path("LOCALAPPDATA")
-        .or_else(|| env_path("APPDATA"))
-        .map(|dir| dir.join("Sessiontree"));
-    #[cfg(not(any(target_os = "macos", windows)))]
-    let dir = env_path("XDG_DATA_HOME")
-        .or_else(|| home_dir().map(|home| home.join(".local/share")))
-        .map(|dir| dir.join("sessiontree"));
-    dir
-}
-
-fn env_path(name: &str) -> Option<PathBuf> {
-    std::env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-}
-
-fn home_dir() -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        env_path("USERPROFILE").or_else(|| env_path("HOME"))
-    }
-    #[cfg(not(windows))]
-    {
-        env_path("HOME")
-    }
 }
 
 fn modified_millis(metadata: &fs::Metadata) -> i64 {
@@ -3112,13 +2902,7 @@ fn estimate(
     cache_write: u64,
 ) -> f64 {
     price_for(provider, model)
-        .map(|price| {
-            (input as f64 * price.0
-                + output as f64 * price.1
-                + cache_read as f64 * price.2
-                + cache_write as f64 * price.3)
-                / 1_000_000.0
-        })
+        .map(|price| price.cost(input, output, cache_read, cache_write))
         .unwrap_or(0.0)
 }
 

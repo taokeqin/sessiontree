@@ -145,6 +145,9 @@ fn rust_ui_scans_and_drills_into_sessions() {
     // The share sheet opens, takes its redaction toggles and closes.
     ui.press("label:Share image").unwrap();
     ui.wait_for("text:Share screenshot").unwrap();
+    ui.wait_for("label:Copy card").unwrap();
+    ui.wait_for("label:Save report…").unwrap();
+    ui.wait_for("label:Save CSV…").unwrap();
     ui.press("label:Agent names").unwrap();
     ui.press("label:Project names").unwrap();
     ui.press("label:Cancel").unwrap();
